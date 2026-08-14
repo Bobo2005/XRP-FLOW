@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display text-text-primary;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-primary-blue ring-offset-2 ring-offset-bg-base;
+  }
+}
+
+@layer utilities {
+  .num {
+    @apply font-mono tabular-nums;
+  }
+}
