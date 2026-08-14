@@ -1,0 +1,13 @@
+{
+  "network": "coston2",
+  "chainId": 114,
+  "deployer": "0x3416DA5e1a125b23eAe34668F1bEDC04a14CE05E",
+  "deployedAt": "2026-08-07T11:58:56.597Z",
+  "deployBlock": 33739161,
+  "contracts": {
+    "MockFXRP": "0x20BA6148f5d3Fea80D69E1aD98585dFBe5CDc011",
+    "MockKinetic": "0x6E29B9cb1A6a81F6c5A74a46557AF3f079891d54",
+    "MockMorpho": "0x025E24A46f33c26D89503b74637F42f6338C6A94",
+    "YieldRouter": "0xBc70058044DA048a17436c03569d00111986f44e"
+  }
+}
