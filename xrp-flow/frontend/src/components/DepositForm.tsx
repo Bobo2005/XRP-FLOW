@@ -65,6 +65,7 @@ export default function DepositForm() {
   useEffect(() => {
     if (!enabled) return;
 
+    
     // Get FXRP decimals
     const fetchDecimals = async () => {
       try {
@@ -75,7 +76,14 @@ export default function DepositForm() {
             data: "0x313ce567" // decimals() function selector
           }, "latest"],
         });
-        setDecimals(parseInt(result, 16));
+        
+        // STABLE FIX: Ensure result is a valid string before parsing
+        if (typeof result === "string" && result !== "0x") {
+          const parsed = parseInt(result, 16);
+          setDecimals(isNaN(parsed) ? 18 : parsed);
+        } else {
+          setDecimals(18); // fallback
+        }
       } catch (error) {
         console.error("[DepositForm] Failed to get FXRP decimals", { error });
         setDecimals(18); // fallback
@@ -141,11 +149,13 @@ export default function DepositForm() {
     }
   }, [amount, decimals]);
 
+  // STABLE FIX: Catch any rogue NaN values before they hit viem's formatUnits
+  const safeDecimals = Number.isInteger(decimals) && decimals >= 0 ? decimals : 18;
+
   const maxAmount =
     mode === "deposit"
-      ? Number(formatUnits(walletBalance, decimals))
-      : Number(formatUnits(depositedAmount, decimals));
-
+      ? Number(formatUnits(walletBalance, safeDecimals))
+      : Number(formatUnits(depositedAmount, safeDecimals));
   const needsApproval =
     mode === "deposit" && parsedAmount > 0n && parsedAmount > allowance;
 
