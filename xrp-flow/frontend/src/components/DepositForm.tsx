@@ -1,3 +1,4 @@
+
 import { useEffect, useMemo, useState } from "react";
 import { ArrowDownToLine, ArrowUpFromLine, CheckCircle2, RefreshCw } from "lucide-react";
 import { parseUnits, formatUnits } from "viem";
@@ -8,20 +9,8 @@ import { toast, withErrorRecovery } from "../lib/toast";
 
 type Mode = "deposit" | "withdraw";
 type Step = "idle" | "approve" | "deposit" | "withdraw" | "rebalancing";
-type VenueIndex = 0 | 1; // 0 = Kinetic, 1 = Morpho, matching the contract's enum
+type VenueIndex = 0 | 1; // 0 = Kinetic, 1 = Morpho
 
-/**
- * Deposit / withdraw card, wired to YieldRouter.depositToVenue()/
- * withdraw() and the FXRP ERC20's approve(). Deposits need an approve()
- * first (the router pulls FXRP via transferFrom); withdrawals don't,
- * since the router already holds the user's deposited FXRP.
- *
- * Venue choice: a user with no existing position can deposit into either
- * Kinetic or Morpho, whichever they prefer — the "Best rate" tag is a
- * hint, not a restriction. Once a position exists, top-ups are locked to
- * that same venue (the contract enforces this too — see VenueMismatch in
- * YieldRouter.sol), so the selector is disabled at that point.
- */
 export default function DepositForm() {
   const [mode, setMode] = useState<Mode>("deposit");
   const [amount, setAmount] = useState("");
@@ -52,7 +41,7 @@ export default function DepositForm() {
     onCorrectNetwork,
   } = useYieldRouter();
 
-  // Local state for data that we need to compute frequently
+  // Local state
   const [decimals, setDecimals] = useState<number>(18);
   const [walletBalance, setWalletBalance] = useState<bigint>(0n);
   const [allowance, setAllowance] = useState<bigint>(0n);
@@ -61,45 +50,52 @@ export default function DepositForm() {
   const [bestVenue, setBestVenue] = useState<VenueIndex>(0);
   const [isMorphoMarketConfigured, setIsMorphoMarketConfigured] = useState<boolean>(false);
 
-  // Fetch static data that doesn't change often
+  // Fetch FXRP decimals on mount/enable
   useEffect(() => {
     if (!enabled) return;
 
-    
-    // Get FXRP decimals
     const fetchDecimals = async () => {
       try {
         const result = await window.ethereum?.request({
           method: "eth_call",
-          params: [{
-            to: CONTRACTS.fxrp.address,
-            data: "0x313ce567" // decimals() function selector
-          }, "latest"],
+          params: [
+            {
+              to: CONTRACTS.fxrp.address,
+              data: "0x313ce567", // decimals()
+            },
+            "latest",
+          ],
         });
-        
-        // STABLE FIX: Ensure result is a valid string before parsing
+
         if (typeof result === "string" && result !== "0x") {
           const parsed = parseInt(result, 16);
           setDecimals(isNaN(parsed) ? 18 : parsed);
         } else {
-          setDecimals(18); // fallback
+          setDecimals(18);
         }
       } catch (error) {
         console.error("[DepositForm] Failed to get FXRP decimals", { error });
-        setDecimals(18); // fallback
+        setDecimals(18);
       }
     };
 
     fetchDecimals();
   }, [enabled]);
 
-  // Fetch user-specific data that can change with transactions
+  // Fetch user balances and state
   useEffect(() => {
     if (!enabled || !address) return;
 
     const fetchUserData = async () => {
       try {
-        const [balance, allowanceValue, depositData, userVenue, bestVenueData, morphoParams] = await Promise.all([
+        const [
+          balance,
+          allowanceValue,
+          depositData,
+          userVenue,
+          bestVenueData,
+          morphoParams,
+        ] = await Promise.all([
           readFxrpBalance(),
           readAllowance(),
           readUserDeposit(),
@@ -115,7 +111,7 @@ export default function DepositForm() {
         setBestVenue(bestVenueData as VenueIndex);
         setIsMorphoMarketConfigured(
           morphoParams !== null &&
-          morphoParams.loanToken !== "0x0000000000000000000000000000000000000000"
+            morphoParams.loanToken !== "0x0000000000000000000000000000000000000000"
         );
       } catch (error) {
         console.error("[DepositForm] Failed to fetch user data", { error });
@@ -123,21 +119,29 @@ export default function DepositForm() {
     };
 
     fetchUserData();
-  }, [enabled, address, readFxrpBalance, readAllowance, readUserDeposit, readUserVenue, readBestVenue, readMorphoMarketParams]);
+  }, [
+    enabled,
+    address,
+    readFxrpBalance,
+    readAllowance,
+    readUserDeposit,
+    readUserVenue,
+    readBestVenue,
+    readMorphoMarketParams,
+  ]);
 
-  // Refetch user data when a transaction is confirmed
-  // Update isConfirming based on step
+  // Sync confirmation status with current active step
   useEffect(() => {
     setIsConfirming(step !== "idle");
   }, [step]);
 
   const hasExistingPosition = depositedAmount > 0n;
-  const wouldNeedMorphoMarket = hasExistingPosition && (existingVenue === 1 || bestVenue === 1);
-  const rebalanceDisabledDueToMorphoMarket = wouldNeedMorphoMarket && !isMorphoMarketConfigured;
+  const wouldNeedMorphoMarket =
+    hasExistingPosition && (existingVenue === 1 || bestVenue === 1);
+  const rebalanceDisabledDueToMorphoMarket =
+    wouldNeedMorphoMarket && !isMorphoMarketConfigured;
   const isAlreadyOptimal = hasExistingPosition && existingVenue === bestVenue;
 
-  // Which venue a deposit would actually go to: locked to the existing
-  // position's venue once one exists, otherwise whatever the user picked.
   const effectiveVenue = hasExistingPosition ? existingVenue : selectedVenue;
 
   const parsedAmount = useMemo(() => {
@@ -149,26 +153,36 @@ export default function DepositForm() {
     }
   }, [amount, decimals]);
 
-  // STABLE FIX: Catch any rogue NaN values before they hit viem's formatUnits
   const safeDecimals = Number.isInteger(decimals) && decimals >= 0 ? decimals : 18;
 
   const maxAmount =
     mode === "deposit"
       ? Number(formatUnits(walletBalance, safeDecimals))
       : Number(formatUnits(depositedAmount, safeDecimals));
+
   const needsApproval =
     mode === "deposit" && parsedAmount > 0n && parsedAmount > allowance;
 
+  const isAmountInvalid =
+    parsedAmount <= 0n ||
+    (mode === "deposit" && parsedAmount > walletBalance) ||
+    (mode === "withdraw" && parsedAmount > depositedAmount);
+
+  // Handlers wrapped with try...finally to prevent state freezing
   const handleApprove = async () => {
+    if (parsedAmount <= 0n) return;
     setStep("approve");
     try {
-      await withErrorRecovery(() =>
-        approve(parsedAmount)
-      );
+      await withErrorRecovery(() => approve(parsedAmount));
       toast.success("Approval submitted! Waiting for confirmation...");
       setApprovalConfirmed(true);
+      
+      // Update local allowance state immediately after approval
+      const updatedAllowance = await readAllowance();
+      setAllowance(updatedAllowance);
     } catch (error) {
       toast.error(`Approval failed: ${describeContractError(error)}`);
+    } finally {
       setStep("idle");
     }
   };
@@ -176,27 +190,25 @@ export default function DepositForm() {
   const handleRebalance = async () => {
     setStep("rebalancing");
     try {
-      await withErrorRecovery(() =>
-        rebalance()
-      );
+      await withErrorRecovery(() => rebalance());
       toast.success("Rebalance submitted! Waiting for confirmation...");
 
-      // Refetch user data after successful rebalance
       const [depositData, userVenue] = await Promise.all([
         readUserDeposit(),
         readUserVenue(),
       ]);
       setDepositedAmount(depositData.amount);
       setExistingVenue(userVenue as VenueIndex);
-
-      setStep("idle");
     } catch (error) {
       toast.error(`Rebalance failed: ${describeContractError(error)}`);
+    } finally {
       setStep("idle");
     }
   };
 
   const handleSubmit = async () => {
+    if (isAmountInvalid) return;
+
     if (mode === "deposit") {
       setStep("deposit");
       try {
@@ -205,41 +217,41 @@ export default function DepositForm() {
         );
         toast.success("Deposit submitted! Waiting for confirmation...");
 
-        // Refetch user data after successful deposit
-        const [depositData, userVenue] = await Promise.all([
+        const [depositData, userVenue, balance] = await Promise.all([
           readUserDeposit(),
           readUserVenue(),
+          readFxrpBalance(),
         ]);
         setDepositedAmount(depositData.amount);
         setExistingVenue(userVenue as VenueIndex);
+        setWalletBalance(balance);
 
-        setStep("idle");
-        setAmount(""); // Clear amount after successful deposit
-        setApprovalConfirmed(false); // Reset approval status
+        setAmount("");
+        setApprovalConfirmed(false);
       } catch (error) {
         toast.error(`Deposit failed: ${describeContractError(error)}`);
+      } finally {
         setStep("idle");
       }
     } else {
       setStep("withdraw");
       try {
-        await withErrorRecovery(() =>
-          withdraw(parsedAmount)
-        );
+        await withErrorRecovery(() => withdraw(parsedAmount));
         toast.success("Withdrawal submitted! Waiting for confirmation...");
 
-        // Refetch user data after successful withdrawal
-        const [depositData, userVenue] = await Promise.all([
+        const [depositData, userVenue, balance] = await Promise.all([
           readUserDeposit(),
           readUserVenue(),
+          readFxrpBalance(),
         ]);
         setDepositedAmount(depositData.amount);
         setExistingVenue(userVenue as VenueIndex);
+        setWalletBalance(balance);
 
-        setStep("idle");
-        setAmount(""); // Clear amount after successful withdrawal
+        setAmount("");
       } catch (error) {
         toast.error(`Withdrawal failed: ${describeContractError(error)}`);
+      } finally {
         setStep("idle");
       }
     }
@@ -271,7 +283,8 @@ export default function DepositForm() {
             setMode("deposit");
             setAmount("");
           }}
-          className={`flex-1 rounded-md py-2 text-sm font-semibold transition-colors ${
+          disabled={isConfirming}
+          className={`flex-1 rounded-md py-2 text-sm font-semibold transition-colors disabled:opacity-60 ${
             mode === "deposit"
               ? "bg-bg-base text-primary-blue shadow-sm"
               : "text-text-muted hover:text-text-primary"
@@ -285,7 +298,8 @@ export default function DepositForm() {
             setMode("withdraw");
             setAmount("");
           }}
-          className={`flex-1 rounded-md py-2 text-sm font-semibold transition-colors ${
+          disabled={isConfirming}
+          className={`flex-1 rounded-md py-2 text-sm font-semibold transition-colors disabled:opacity-60 ${
             mode === "withdraw"
               ? "bg-bg-base text-primary-blue shadow-sm"
               : "text-text-muted hover:text-text-primary"
@@ -328,7 +342,7 @@ export default function DepositForm() {
                     <button
                       key={venueIndex}
                       type="button"
-                      onClick={() => setSelectedVenue(venueIndex as VenueIndex)}
+                      onClick={() => setSelectedVenue(venueIndex)}
                       disabled={isConfirming}
                       className={`flex items-center justify-between w-full rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors disabled:opacity-60 ${
                         selectedVenue === venueIndex
@@ -382,29 +396,35 @@ export default function DepositForm() {
             FXRP
           </p>
 
-          {/* Rebalance button - enabled when contract is ready */}
+          {/* Rebalance button */}
           {mode === "deposit" && hasExistingPosition && (
             <button
               type="button"
-              disabled={isConfirming || rebalanceDisabledDueToMorphoMarket || isAlreadyOptimal}
+              disabled={
+                isConfirming ||
+                rebalanceDisabledDueToMorphoMarket ||
+                isAlreadyOptimal
+              }
               onClick={handleRebalance}
-              className={`mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-primary-blue bg-primary-blue/5 px-4 py-3 text-sm font-semibold text-primary-blue transition-colors hover:bg-primary-blue/10 disabled:cursor-not-allowed disabled:opacity-60`}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-primary-blue bg-primary-blue/5 px-4 py-3 text-sm font-semibold text-primary-blue transition-colors hover:bg-primary-blue/10 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <RefreshCw
-                className={`h-4 w-4 ${step === "rebalancing" ? "animate-spin" : ""}`}
+                className={`h-4 w-4 ${
+                  step === "rebalancing" ? "animate-spin" : ""
+                }`}
                 aria-hidden
               />
               {step === "rebalancing"
                 ? "Rebalancing..."
                 : isAlreadyOptimal
-                  ? "Already in Best Venue"
-                  : "Rebalance to Best Venue"}
+                ? "Already in Best Venue"
+                : "Rebalance to Best Venue"}
             </button>
           )}
 
           <button
             type="button"
-            disabled={isConfirming}
+            disabled={isConfirming || isAmountInvalid}
             onClick={needsApproval ? handleApprove : handleSubmit}
             className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-primary-blue px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
           >

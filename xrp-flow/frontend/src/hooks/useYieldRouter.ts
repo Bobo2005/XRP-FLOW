@@ -1,3 +1,5 @@
+
+
 import { useAccount, useChainId, usePublicClient, useWalletClient } from "wagmi";
 import { useCallback } from "react";
 import { formatUnits } from "viem";
@@ -14,14 +16,14 @@ export function useYieldRouter() {
   const publicClient = usePublicClient();
   const walletClient = useWalletClient();
   const onCorrectNetwork = chainId === coston2.id;
-  const enabled = isDeployed && isConnected && onCorrectNetwork && !!address && !!publicClient;
+  const enabled =
+    isDeployed && isConnected && onCorrectNetwork && !!address && !!publicClient;
 
   /**
    * Reads the user's deposit information from the YieldRouter contract.
-   * @returns Promise containing the user's deposit amount and timestamp
    */
   const readUserDeposit = useCallback(async () => {
-    if (!enabled) {
+    if (!enabled || !publicClient) {
       return { amount: 0n, timestamp: 0n };
     }
 
@@ -33,11 +35,10 @@ export function useYieldRouter() {
         args: [address],
       });
 
-      // Ensure we have a valid tuple result
       if (Array.isArray(result) && result.length >= 2) {
         return {
-          amount: result[0],
-          timestamp: result[1],
+          amount: BigInt(result[0]),
+          timestamp: BigInt(result[1]),
         };
       }
     } catch (error) {
@@ -48,12 +49,11 @@ export function useYieldRouter() {
   }, [enabled, address, publicClient]);
 
   /**
-   * Reads the user's current venue (where their deposit is allocated).
-   * @returns Promise containing the venue index (0=Kinetic, 1=Morpho)
+   * Reads the user's current venue (0=Kinetic, 1=Morpho).
    */
   const readUserVenue = useCallback(async () => {
-    if (!enabled) {
-      return 0; // Default to Kinetic
+    if (!enabled || !publicClient) {
+      return 0;
     }
 
     try {
@@ -64,7 +64,6 @@ export function useYieldRouter() {
         args: [address],
       });
 
-      // Ensure we have a valid result
       if (typeof result === "number" || typeof result === "bigint") {
         return Number(result);
       }
@@ -76,12 +75,11 @@ export function useYieldRouter() {
   }, [enabled, address, publicClient]);
 
   /**
-   * Reads the best venue based on current APY rates.
-   * @returns Promise containing the venue index (0=Kinetic, 1=Morpho)
+   * Reads the best venue based on current APY rates (0=Kinetic, 1=Morpho).
    */
   const readBestVenue = useCallback(async () => {
-    if (!enabled) {
-      return 0; // Default to Kinetic
+    if (!enabled || !publicClient) {
+      return 0;
     }
 
     try {
@@ -91,7 +89,6 @@ export function useYieldRouter() {
         functionName: "getBestVenue",
       });
 
-      // Ensure we have a valid result
       if (typeof result === "number" || typeof result === "bigint") {
         return Number(result);
       }
@@ -104,11 +101,10 @@ export function useYieldRouter() {
 
   /**
    * Reads the user's reputation tier.
-   * @returns Promise containing the reputation tier index (0=None, 1=Bronze, 2=Silver, 3=Gold)
    */
   const readReputationTier = useCallback(async () => {
-    if (!enabled) {
-      return 0; // None
+    if (!enabled || !publicClient) {
+      return 0;
     }
 
     try {
@@ -119,7 +115,6 @@ export function useYieldRouter() {
         args: [address],
       });
 
-      // Ensure we have a valid result
       if (typeof result === "number" || typeof result === "bigint") {
         return Number(result);
       }
@@ -132,10 +127,9 @@ export function useYieldRouter() {
 
   /**
    * Reads the Morpho market configuration parameters.
-   * @returns Promise containing the market parameters or null if not configured
    */
   const readMorphoMarketParams = useCallback(async () => {
-    if (!enabled) {
+    if (!enabled || !publicClient) {
       return null;
     }
 
@@ -146,7 +140,6 @@ export function useYieldRouter() {
         functionName: "morphoMarketParams",
       });
 
-      // Ensure we have a valid tuple result
       if (Array.isArray(result) && result.length >= 5) {
         return {
           loanToken: result[0] as `0x${string}`,
@@ -164,11 +157,11 @@ export function useYieldRouter() {
   }, [enabled, publicClient]);
 
   /**
-   * Reads the current APY rates for both venues.
-   * @returns Promise containing kineticAPY and morphoAPY as numbers (percentage)
+   * Reads current APY rates for Kinetic and Morpho.
+   * Handles both plain scalar bigint returns and tuple outputs safely.
    */
   const readApyRates = useCallback(async () => {
-    if (!enabled) {
+    if (!enabled || !publicClient) {
       return { kineticAPY: 0, morphoAPY: 0 };
     }
 
@@ -186,9 +179,16 @@ export function useYieldRouter() {
         }),
       ]);
 
-      // Ensure we have valid results
-      const kineticRaw = Array.isArray(kineticResult) && kineticResult.length > 0 ? kineticResult[0] : 0n;
-      const morphoRaw = Array.isArray(morphoResult) && morphoResult.length > 0 ? morphoResult[0] : 0n;
+      const extractValue = (val: unknown): bigint => {
+        if (typeof val === "bigint") return val;
+        if (Array.isArray(val) && val.length > 0 && typeof val[0] === "bigint") {
+          return val[0];
+        }
+        return 0n;
+      };
+
+      const kineticRaw = extractValue(kineticResult);
+      const morphoRaw = extractValue(morphoResult);
 
       return {
         kineticAPY: Number(formatUnits(kineticRaw, 18)) * 100,
@@ -202,11 +202,10 @@ export function useYieldRouter() {
   }, [enabled, publicClient]);
 
   /**
-   * Reads the user's FXRP allowance for the YieldRouter contract.
-   * @returns Promise containing the allowance amount
+   * Reads user FXRP allowance.
    */
   const readAllowance = useCallback(async () => {
-    if (!enabled) {
+    if (!enabled || !publicClient) {
       return 0n;
     }
 
@@ -218,7 +217,6 @@ export function useYieldRouter() {
         args: [address, CONTRACTS.yieldRouter.address],
       });
 
-      // Ensure we have a valid result
       if (typeof result === "bigint") {
         return result;
       }
@@ -230,11 +228,10 @@ export function useYieldRouter() {
   }, [enabled, address, publicClient]);
 
   /**
-   * Reads the user's FXRP balance.
-   * @returns Promise containing the balance amount
+   * Reads user FXRP balance.
    */
   const readFxrpBalance = useCallback(async () => {
-    if (!enabled) {
+    if (!enabled || !publicClient) {
       return 0n;
     }
 
@@ -246,7 +243,6 @@ export function useYieldRouter() {
         args: [address],
       });
 
-      // Ensure we have a valid result
       if (typeof result === "bigint") {
         return result;
       }
@@ -258,153 +254,117 @@ export function useYieldRouter() {
   }, [enabled, address, publicClient]);
 
   /**
-   * Approves the YieldRouter contract to spend FXRP on behalf of the user.
-   * @param amount The amount to approve (in wei)
-   * @returns Promise that resolves when the transaction is confirmed
+   * Approves YieldRouter to spend FXRP.
    */
   const approve = useCallback(
     async (amount: bigint) => {
-      if (!enabled || !walletClient.data) {
-        throw new Error("Wallet not connected or contracts not deployed");
+      const client = walletClient.data;
+      if (!enabled || !client || !publicClient) {
+        throw new Error("Wallet not connected or network mismatch");
       }
 
-      try {
-        const hash = await walletClient.data!.writeContract({
-          address: CONTRACTS.fxrp.address,
-          abi: CONTRACTS.fxrp.abi,
-          functionName: "approve",
-          args: [CONTRACTS.yieldRouter.address, amount],
-        });
+      const hash = await client.writeContract({
+        address: CONTRACTS.fxrp.address,
+        abi: CONTRACTS.fxrp.abi,
+        functionName: "approve",
+        args: [CONTRACTS.yieldRouter.address, amount],
+      });
 
-        // Wait for transaction confirmation
-        await publicClient.waitForTransactionReceipt({ hash });
-        return hash;
-      } catch (error) {
-        console.error("[useYieldRouter] approve failed", { error });
-        throw error;
-      }
+      await publicClient.waitForTransactionReceipt({ hash });
+      return hash;
     },
-    [enabled, walletClient],
+    [enabled, walletClient.data, publicClient]
   );
 
   /**
-   * Deposits FXRP into the best available venue (auto-routing).
-   * @param amount The amount to deposit (in wei)
-   * @returns Promise that resolves when the transaction is confirmed
+   * Auto-routes deposit to the best venue.
    */
   const deposit = useCallback(
     async (amount: bigint) => {
-      if (!enabled || !walletClient.data) {
-        throw new Error("Wallet not connected or contracts not deployed");
+      const client = walletClient.data;
+      if (!enabled || !client || !publicClient) {
+        throw new Error("Wallet not connected or network mismatch");
       }
 
-      try {
-        const hash = await walletClient.data!.writeContract({
-          address: CONTRACTS.yieldRouter.address,
-          abi: CONTRACTS.yieldRouter.abi,
-          functionName: "deposit",
-          args: [amount],
-        });
+      const hash = await client.writeContract({
+        address: CONTRACTS.yieldRouter.address,
+        abi: CONTRACTS.yieldRouter.abi,
+        functionName: "deposit",
+        args: [amount],
+      });
 
-        // Wait for transaction confirmation
-        await publicClient.waitForTransactionReceipt({ hash });
-        return hash;
-      } catch (error) {
-        console.error("[useYieldRouter] deposit failed", { error });
-        throw error;
-      }
+      await publicClient.waitForTransactionReceipt({ hash });
+      return hash;
     },
-    [enabled, walletClient],
+    [enabled, walletClient.data, publicClient]
   );
 
   /**
-   * Deposits FXRP into a specific venue.
-   * @param amount The amount to deposit (in wei)
-   * @param venue The venue to deposit into (0=Kinetic, 1=Morpho)
-   * @returns Promise that resolves when the transaction is confirmed
+   * Deposits FXRP into a specified venue (0=Kinetic, 1=Morpho).
    */
   const depositToVenue = useCallback(
     async (amount: bigint, venue: 0 | 1) => {
-      if (!enabled || !walletClient.data) {
-        throw new Error("Wallet not connected or contracts not deployed");
+      const client = walletClient.data;
+      if (!enabled || !client || !publicClient) {
+        throw new Error("Wallet not connected or network mismatch");
       }
 
-      try {
-        const hash = await walletClient.data!.writeContract({
-          address: CONTRACTS.yieldRouter.address,
-          abi: CONTRACTS.yieldRouter.abi,
-          functionName: "depositToVenue",
-          args: [amount, venue],
-        });
+      const hash = await client.writeContract({
+        address: CONTRACTS.yieldRouter.address,
+        abi: CONTRACTS.yieldRouter.abi,
+        functionName: "depositToVenue",
+        args: [amount, venue],
+      });
 
-        // Wait for transaction confirmation
-        await publicClient.waitForTransactionReceipt({ hash });
-        return hash;
-      } catch (error) {
-        console.error("[useYieldRouter] depositToVenue failed", { error });
-        throw error;
-      }
+      await publicClient.waitForTransactionReceipt({ hash });
+      return hash;
     },
-    [enabled, walletClient],
+    [enabled, walletClient.data, publicClient]
   );
 
   /**
-   * Withdraws FXRP from the user's current venue.
-   * @param amount The amount to withdraw (in wei)
-   * @returns Promise that resolves when the transaction is completed
+   * Withdraws FXRP from current venue.
    */
   const withdraw = useCallback(
     async (amount: bigint) => {
-      if (!enabled || !walletClient.data) {
-        throw new Error("Wallet not connected or contracts not deployed");
+      const client = walletClient.data;
+      if (!enabled || !client || !publicClient) {
+        throw new Error("Wallet not connected or network mismatch");
       }
 
-      try {
-        const hash = await walletClient.data!.writeContract({
-          address: CONTRACTS.yieldRouter.address,
-          abi: CONTRACTS.yieldRouter.abi,
-          functionName: "withdraw",
-          args: [amount],
-        });
+      const hash = await client.writeContract({
+        address: CONTRACTS.yieldRouter.address,
+        abi: CONTRACTS.yieldRouter.abi,
+        functionName: "withdraw",
+        args: [amount],
+      });
 
-        // Wait for transaction confirmation
-        await publicClient.waitForTransactionReceipt({ hash });
-        return hash;
-      } catch (error) {
-        console.error("[useYieldRouter] withdraw failed", { error });
-        throw error;
-      }
+      await publicClient.waitForTransactionReceipt({ hash });
+      return hash;
     },
-    [enabled, walletClient],
+    [enabled, walletClient.data, publicClient]
   );
 
   /**
-   * Rebalances the user's deposit to the better-yielding venue.
-   * @returns Promise that resolves when the transaction is confirmed
+   * Rebalances user deposit to the higher yielding venue.
    */
   const rebalance = useCallback(async () => {
-    if (!enabled || !walletClient.data) {
-      throw new Error("Wallet not connected or contracts not deployed");
+    const client = walletClient.data;
+    if (!enabled || !client || !publicClient) {
+      throw new Error("Wallet not connected or network mismatch");
     }
 
-    try {
-      const hash = await walletClient.data!.writeContract({
-        address: CONTRACTS.yieldRouter.address,
-        abi: CONTRACTS.yieldRouter.abi,
-        functionName: "rebalance",
-        args: [],
-      });
+    const hash = await client.writeContract({
+      address: CONTRACTS.yieldRouter.address,
+      abi: CONTRACTS.yieldRouter.abi,
+      functionName: "rebalance",
+      args: [],
+    });
 
-      // Wait for transaction confirmation
-      await publicClient.waitForTransactionReceipt({ hash });
-      return hash;
-    } catch (error) {
-      console.error("[useYieldRouter] rebalance failed", { error });
-      throw error;
-    }
-  }, [enabled, walletClient]);
+    await publicClient.waitForTransactionReceipt({ hash });
+    return hash;
+  }, [enabled, walletClient.data, publicClient]);
 
-  // Return all the functions and state
   return {
     // Read functions
     readUserDeposit,
