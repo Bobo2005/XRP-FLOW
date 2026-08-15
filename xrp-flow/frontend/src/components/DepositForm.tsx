@@ -1,11 +1,12 @@
 
+
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { ArrowDownToLine, ArrowUpFromLine, CheckCircle2, RefreshCw } from "lucide-react";
 import { parseUnits, formatUnits } from "viem";
 import { useYieldRouter, isUserRejectedError } from "../hooks/useYieldRouter";
-import {  isDeployed, venueNameFromIndex } from "../contracts";
+import { isDeployed, venueNameFromIndex } from "../contracts";
 import { describeContractError } from "../lib/errors";
-import { toast, withErrorRecovery } from "../lib/toast";
+import { toast } from "../lib/toast"; // Removed withErrorRecovery
 
 type Mode = "deposit" | "withdraw";
 type Step = "idle" | "approve" | "deposit" | "withdraw" | "rebalancing";
@@ -181,7 +182,8 @@ export default function DepositForm() {
     if (parsedAmount <= 0n) return;
     setStep("approve");
     try {
-      await withErrorRecovery(() => approve(parsedAmount));
+      // FIX: Removed withErrorRecovery wrapper
+      await approve(parsedAmount);
       toast.success("Approval confirmed! You can now complete the deposit.");
       setApprovalConfirmed(true);
 
@@ -190,9 +192,9 @@ export default function DepositForm() {
     } catch (error) {
       if (isUserRejectedError(error)) {
         toast.info("Transaction cancelled in wallet.");
-      } else {
-        toast.error(`Approval failed: ${describeContractError(error)}`);
+        return;
       }
+      toast.error(`Approval failed: ${describeContractError(error)}`);
     } finally {
       setStep("idle");
     }
@@ -201,15 +203,16 @@ export default function DepositForm() {
   const handleRebalance = async () => {
     setStep("rebalancing");
     try {
-      await withErrorRecovery(() => rebalance());
+      // FIX: Removed withErrorRecovery wrapper
+      await rebalance();
       toast.success("Rebalance executed successfully!");
       await refreshUserData();
     } catch (error) {
       if (isUserRejectedError(error)) {
         toast.info("Rebalance cancelled in wallet.");
-      } else {
-        toast.error(`Rebalance failed: ${describeContractError(error)}`);
+        return;
       }
+      toast.error(`Rebalance failed: ${describeContractError(error)}`);
     } finally {
       setStep("idle");
     }
@@ -221,9 +224,8 @@ export default function DepositForm() {
     if (mode === "deposit") {
       setStep("deposit");
       try {
-        await withErrorRecovery(() =>
-          depositToVenue(parsedAmount, effectiveVenue)
-        );
+        // FIX: Removed withErrorRecovery wrapper
+        await depositToVenue(parsedAmount, effectiveVenue);
         toast.success("Deposit confirmed!");
         await refreshUserData();
         setAmount("");
@@ -231,25 +233,26 @@ export default function DepositForm() {
       } catch (error) {
         if (isUserRejectedError(error)) {
           toast.info("Deposit cancelled in wallet.");
-        } else {
-          toast.error(`Deposit failed: ${describeContractError(error)}`);
+          return;
         }
+        toast.error(`Deposit failed: ${describeContractError(error)}`);
       } finally {
         setStep("idle");
       }
     } else {
       setStep("withdraw");
       try {
-        await withErrorRecovery(() => withdraw(parsedAmount));
+        // FIX: Removed withErrorRecovery wrapper
+        await withdraw(parsedAmount);
         toast.success("Withdrawal confirmed!");
         await refreshUserData();
         setAmount("");
       } catch (error) {
         if (isUserRejectedError(error)) {
           toast.info("Withdrawal cancelled in wallet.");
-        } else {
-          toast.error(`Withdrawal failed: ${describeContractError(error)}`);
+          return;
         }
+        toast.error(`Withdrawal failed: ${describeContractError(error)}`);
       } finally {
         setStep("idle");
       }
