@@ -1,3 +1,5 @@
+
+
 import { useQuery } from "@tanstack/react-query";
 import { useAccount, useChainId, usePublicClient } from "wagmi";
 import { formatUnits } from "viem";
@@ -34,7 +36,7 @@ export function useHistoricalData() {
         };
       }
 
-      // Get current APY values first
+      // Get current APY values first with fallback handling
       let kineticRaw: bigint = 0n;
       let morphoResult: bigint = 0n;
 
@@ -44,7 +46,7 @@ export function useHistoricalData() {
           abi: CONTRACTS.yieldRouter.abi,
           functionName: "kineticMockAPY"
         });
-        kineticRaw = Array.isArray(kineticResult) && kineticResult.length > 0 ? kineticResult[0] : 0n;
+        kineticRaw = Array.isArray(kineticResult) && kineticResult.length > 0 ? BigInt(kineticResult[0] as string | number | bigint) : 0n;
       } catch (err) {
         console.error("[useHistoricalData] readContract kineticMockAPY failed", { error: err });
       }
@@ -55,49 +57,38 @@ export function useHistoricalData() {
           abi: CONTRACTS.yieldRouter.abi,
           functionName: "morphoMockAPY"
         });
-        morphoResult = Array.isArray(morphoResultTuple) && morphoResultTuple.length > 0 ? morphoResultTuple[0] : 0n;
+        morphoResult = Array.isArray(morphoResultTuple) && morphoResultTuple.length > 0 ? BigInt(morphoResultTuple[0] as string | number | bigint) : 0n;
       } catch (err) {
         console.error("[useHistoricalData] readContract morphoMockAPY failed", { error: err });
       }
 
       const kineticAPY = Number(formatUnits(kineticRaw, 18)) * 100;
       const morphoAPY = Number(formatUnits(morphoResult, 18)) * 100;
-      const bestAPY = Math.max(kineticAPY, morphoAPY);
+      const bestAPY = Math.max(isNaN(kineticAPY) ? 0 : kineticAPY, isNaN(morphoAPY) ? 0 : morphoAPY);
 
       // Fetch block number safely
-      let toBlock: bigint;
+      let toBlock: bigint = 0n;
       try {
         toBlock = await publicClient.getBlockNumber();
       } catch (err) {
         console.error("[useHistoricalData] getBlockNumber failed", { error: err });
-        toBlock = 0n;
       }
 
-      // Calculate safe fromBlock to prevent RPC range limit errors (max 5000 blocks back)
-      // Note: Coston2 public RPC can be very strict. If 1000 fails, try lowering this to 100n.
+      // Calculate safe fromBlock to prevent RPC range limit errors
       const MAX_BLOCK_RANGE = 29n;
       const configuredDeployBlock = deploymentInfo.deployBlock ? BigInt(deploymentInfo.deployBlock) : 0n;
 
-      let fromBlock: bigint;
+      let fromBlock: bigint = 0n;
       if (configuredDeployBlock > 0n && toBlock > configuredDeployBlock && (toBlock - configuredDeployBlock) <= MAX_BLOCK_RANGE) {
         fromBlock = configuredDeployBlock;
       } else {
         fromBlock = toBlock > MAX_BLOCK_RANGE ? toBlock - MAX_BLOCK_RANGE : 0n;
       }
 
-      // Fetch MockAPYUpdated events
+      // Fetch MockAPYUpdated events safely
       let logs: any[] = [];
-      if (toBlock > 0n && CONTRACTS.yieldRouter.address) {
+      if (toBlock > 0n && CONTRACTS.yieldRouter?.address) {
         try {
-          
-          // Debugger safely moved OUTSIDE of the object literal
-          console.log("RPC Payload Check:", {
-            address: CONTRACTS.yieldRouter.address,
-            fromBlock: fromBlock.toString(),
-            toBlock: toBlock.toString(),
-            rangeSize: (toBlock - fromBlock).toString(),
-          });
-
           const events = await publicClient.getContractEvents({
             address: CONTRACTS.yieldRouter.address,
             abi: CONTRACTS.yieldRouter.abi,
@@ -105,7 +96,6 @@ export function useHistoricalData() {
             fromBlock,
             toBlock
           });
-          
           logs = Array.isArray(events) ? events : [];
         } catch (err) {
           console.error("[useHistoricalData] getContractEvents failed", { error: err });
@@ -113,25 +103,21 @@ export function useHistoricalData() {
         }
       }
 
-      // Process events into historical data points
-      const apyHistory: HistoricalAPYPoint[] = [];
+      // Process events into historical data points using a Map for O(1) aggregation
+      const historyMap = new Map<number, HistoricalAPYPoint>();
+      const currentTimeSec = Math.floor(Date.now() / 1000);
 
       for (const log of logs) {
-        if (!log || !log.args) {
-          console.warn("[useHistoricalData] Skipping log with missing args", { log });
-          continue;
-        }
+        if (!log || !log.args) continue;
 
-        let timestamp: number;
+        let timestamp = currentTimeSec;
         try {
           if (log.blockNumber) {
             const block = await publicClient.getBlock({ blockNumber: log.blockNumber });
-            timestamp = Number(block.timestamp);
-          } else {
-            timestamp = Date.now() / 1000;
+            if (block?.timestamp) timestamp = Number(block.timestamp);
           }
         } catch {
-          timestamp = Date.now() / 1000;
+          // Fallback to current time if block query fails
         }
 
         let venue: number | undefined;
@@ -139,53 +125,49 @@ export function useHistoricalData() {
 
         try {
           venue = Number(log.args.venue);
-          newAPY = log.args.newAPY;
+          newAPY = log.args.newAPY ? BigInt(log.args.newAPY) : undefined;
         } catch (err) {
-          console.error("[useHistoricalData] Failed to parse event args", { error: err, log });
           continue;
         }
 
-        if (isNaN(venue) || !newAPY) {
-          console.warn("[useHistoricalData] Skipping log with invalid args", { venue, newAPY, log });
-          continue;
-        }
+        if (isNaN(venue) || newAPY === undefined) continue;
 
+        const roundedTimestamp = Math.floor(timestamp);
         const newAPYNumber = Number(formatUnits(newAPY, 18)) * 100;
+        if (isNaN(newAPYNumber)) continue;
 
-        let existingPoint = apyHistory.find(point =>
-          Math.abs(point.timestamp - timestamp) < 1
-        );
-
-        if (!existingPoint) {
-          existingPoint = {
-            timestamp: Math.floor(timestamp),
-            kineticAPY: venue === 0 ? newAPYNumber : kineticAPY,
-            morphoAPY: venue === 1 ? newAPYNumber : morphoAPY,
+        let point = historyMap.get(roundedTimestamp);
+        if (!point) {
+          point = {
+            timestamp: roundedTimestamp,
+            kineticAPY: venue === 0 ? newAPYNumber : (isNaN(kineticAPY) ? 0 : kineticAPY),
+            morphoAPY: venue === 1 ? newAPYNumber : (isNaN(morphoAPY) ? 0 : morphoAPY),
             bestAPY: 0
           };
-          apyHistory.push(existingPoint);
         } else {
           if (venue === 0) {
-            existingPoint.kineticAPY = newAPYNumber;
+            point.kineticAPY = newAPYNumber;
           } else {
-            existingPoint.morphoAPY = newAPYNumber;
+            point.morphoAPY = newAPYNumber;
           }
         }
 
-        existingPoint.bestAPY = Math.max(existingPoint.kineticAPY, existingPoint.morphoAPY);
+        point.bestAPY = Math.max(point.kineticAPY, point.morphoAPY);
+        historyMap.set(roundedTimestamp, point);
       }
 
-      // Add current values as the most recent point if no recent data exists
-      const now = Date.now() / 1000;
+      const apyHistory: HistoricalAPYPoint[] = Array.from(historyMap.values());
+
+      // Ensure recent point exists if gap is too large
       if (
         apyHistory.length === 0 ||
-        Math.abs(apyHistory[apyHistory.length - 1].timestamp - now) > 300
+        Math.abs(apyHistory[apyHistory.length - 1].timestamp - currentTimeSec) > 300
       ) {
         apyHistory.push({
-          timestamp: Math.floor(now),
-          kineticAPY,
-          morphoAPY,
-          bestAPY
+          timestamp: currentTimeSec,
+          kineticAPY: isNaN(kineticAPY) ? 0 : kineticAPY,
+          morphoAPY: isNaN(morphoAPY) ? 0 : morphoAPY,
+          bestAPY: isNaN(bestAPY) ? 0 : bestAPY
         });
       }
 
@@ -195,11 +177,15 @@ export function useHistoricalData() {
         apyHistory.splice(0, apyHistory.length - 168);
       }
 
+      const safeKinetic = !isNaN(kineticAPY) ? kineticAPY : 0;
+      const safeMorpho = !isNaN(morphoAPY) ? morphoAPY : 0;
+      const safeBest = !isNaN(bestAPY) ? bestAPY : 0;
+
       return {
-        apyHistory: Array.isArray(apyHistory) ? apyHistory : [],
-        currentKineticAPY: (typeof kineticAPY === 'number' && !isNaN(kineticAPY)) ? kineticAPY : 0,
-        currentMorphoAPY: (typeof morphoAPY === 'number' && !isNaN(morphoAPY)) ? morphoAPY : 0,
-        currentBestAPY: (typeof bestAPY === 'number' && !isNaN(bestAPY)) ? bestAPY : 0
+        apyHistory,
+        currentKineticAPY: safeKinetic,
+        currentMorphoAPY: safeMorpho,
+        currentBestAPY: safeBest
       };
     },
     refetchInterval: 5 * 60 * 1000,
@@ -214,13 +200,14 @@ export function calculateProjectedYield(
   apy: number,
   compoundFrequency: number = 365
 ): number {
+  if (isNaN(depositAmount) || isNaN(apy) || depositAmount <= 0 || apy <= 0) return 0;
   const principal = depositAmount;
   const rate = apy / 100;
   const n = compoundFrequency;
   const t = 1;
 
   const finalAmount = principal * Math.pow(1 + rate / n, n * t);
-  return finalAmount - principal;
+  return isNaN(finalAmount) ? 0 : finalAmount - principal;
 }
 
 /**
@@ -269,7 +256,7 @@ export function calculateTierProgress(
     const tierRange = nextTierThreshold - currentTierStart;
     const progressInTier = currentScore - currentTierStart;
 
-    if (tierRange > 0) {
+    if (tierRange > 0n) {
       progressToNext = Number((progressInTier * 100n) / tierRange);
       progressToNext = Math.min(100, Math.max(0, progressToNext));
     }
