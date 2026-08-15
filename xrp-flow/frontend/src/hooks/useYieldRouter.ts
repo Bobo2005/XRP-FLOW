@@ -1,6 +1,4 @@
-
-
-import { useAccount, useChainId, usePublicClient, useWalletClient } from "wagmi";
+import { useAccount, useChainId, usePublicClient, useWriteContract } from "wagmi";
 import { useCallback } from "react";
 import { formatUnits } from "viem";
 import { CONTRACTS, isDeployed } from "../contracts";
@@ -14,7 +12,8 @@ export function useYieldRouter() {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const publicClient = usePublicClient();
-  const walletClient = useWalletClient();
+  const { writeContractAsync } = useWriteContract();
+
   const onCorrectNetwork = chainId === coston2.id;
   const enabled =
     isDeployed && isConnected && onCorrectNetwork && !!address && !!publicClient;
@@ -158,7 +157,6 @@ export function useYieldRouter() {
 
   /**
    * Reads current APY rates for Kinetic and Morpho.
-   * Handles both plain scalar bigint returns and tuple outputs safely.
    */
   const readApyRates = useCallback(async () => {
     if (!enabled || !publicClient) {
@@ -258,22 +256,22 @@ export function useYieldRouter() {
    */
   const approve = useCallback(
     async (amount: bigint) => {
-      const client = walletClient.data;
-      if (!enabled || !client || !publicClient) {
+      if (!enabled || !publicClient) {
         throw new Error("Wallet not connected or network mismatch");
       }
 
-      const hash = await client.writeContract({
+      const hash = await writeContractAsync({
         address: CONTRACTS.fxrp.address,
         abi: CONTRACTS.fxrp.abi,
         functionName: "approve",
         args: [CONTRACTS.yieldRouter.address, amount],
+        gas: 300000n, // Explicit gas limit to prevent eth_estimateGas freezes
       });
 
       await publicClient.waitForTransactionReceipt({ hash });
       return hash;
     },
-    [enabled, walletClient.data, publicClient]
+    [enabled, publicClient, writeContractAsync]
   );
 
   /**
@@ -281,22 +279,22 @@ export function useYieldRouter() {
    */
   const deposit = useCallback(
     async (amount: bigint) => {
-      const client = walletClient.data;
-      if (!enabled || !client || !publicClient) {
+      if (!enabled || !publicClient) {
         throw new Error("Wallet not connected or network mismatch");
       }
 
-      const hash = await client.writeContract({
+      const hash = await writeContractAsync({
         address: CONTRACTS.yieldRouter.address,
         abi: CONTRACTS.yieldRouter.abi,
         functionName: "deposit",
         args: [amount],
+        gas: 500000n,
       });
 
       await publicClient.waitForTransactionReceipt({ hash });
       return hash;
     },
-    [enabled, walletClient.data, publicClient]
+    [enabled, publicClient, writeContractAsync]
   );
 
   /**
@@ -304,22 +302,22 @@ export function useYieldRouter() {
    */
   const depositToVenue = useCallback(
     async (amount: bigint, venue: 0 | 1) => {
-      const client = walletClient.data;
-      if (!enabled || !client || !publicClient) {
+      if (!enabled || !publicClient) {
         throw new Error("Wallet not connected or network mismatch");
       }
 
-      const hash = await client.writeContract({
+      const hash = await writeContractAsync({
         address: CONTRACTS.yieldRouter.address,
         abi: CONTRACTS.yieldRouter.abi,
         functionName: "depositToVenue",
         args: [amount, venue],
+        gas: 500000n,
       });
 
       await publicClient.waitForTransactionReceipt({ hash });
       return hash;
     },
-    [enabled, walletClient.data, publicClient]
+    [enabled, publicClient, writeContractAsync]
   );
 
   /**
@@ -327,43 +325,43 @@ export function useYieldRouter() {
    */
   const withdraw = useCallback(
     async (amount: bigint) => {
-      const client = walletClient.data;
-      if (!enabled || !client || !publicClient) {
+      if (!enabled || !publicClient) {
         throw new Error("Wallet not connected or network mismatch");
       }
 
-      const hash = await client.writeContract({
+      const hash = await writeContractAsync({
         address: CONTRACTS.yieldRouter.address,
         abi: CONTRACTS.yieldRouter.abi,
         functionName: "withdraw",
         args: [amount],
+        gas: 500000n,
       });
 
       await publicClient.waitForTransactionReceipt({ hash });
       return hash;
     },
-    [enabled, walletClient.data, publicClient]
+    [enabled, publicClient, writeContractAsync]
   );
 
   /**
    * Rebalances user deposit to the higher yielding venue.
    */
   const rebalance = useCallback(async () => {
-    const client = walletClient.data;
-    if (!enabled || !client || !publicClient) {
+    if (!enabled || !publicClient) {
       throw new Error("Wallet not connected or network mismatch");
     }
 
-    const hash = await client.writeContract({
+    const hash = await writeContractAsync({
       address: CONTRACTS.yieldRouter.address,
       abi: CONTRACTS.yieldRouter.abi,
       functionName: "rebalance",
       args: [],
+      gas: 600000n,
     });
 
     await publicClient.waitForTransactionReceipt({ hash });
     return hash;
-  }, [enabled, walletClient.data, publicClient]);
+  }, [enabled, publicClient, writeContractAsync]);
 
   return {
     // Read functions
