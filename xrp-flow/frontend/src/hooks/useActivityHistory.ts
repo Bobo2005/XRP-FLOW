@@ -6,13 +6,25 @@ import { coston2 } from "../wagmi";
 import type { ActivityItem } from "../types";
 
 const MAX_BLOCK_RANGE = 30n;
-const CHUNK_CONCURRENCY = 1; // Sequential execution to prevent 429 rate limits
+const CHUNK_CONCURRENCY = 1;
 const BATCH_DELAY_MS = 300;
-const INITIAL_LOOKBACK_BLOCKS = 3000n; // ~1.5 hours of blocks on Coston2 for initial scan
+const INITIAL_LOOKBACK_BLOCKS = 3000n;
 
 interface StoredHistory {
   lastScannedBlock: string;
   items: ActivityItem[];
+}
+
+interface ParsedYieldLog {
+  eventName: "Deposited" | "Withdrawn";
+  args: {
+    user?: Address;
+    amount?: bigint;
+    venue?: number;
+  };
+  blockNumber: bigint | null;
+  transactionHash: Address | null;
+  logIndex: number | null;
 }
 
 function getStorageKey(address: string, routerAddress: string) {
@@ -60,7 +72,6 @@ export function useActivityHistory(decimals: number) {
         return cached?.items ?? [];
       }
 
-      // Determine starting block: use local cache, or cap initial scan to INITIAL_LOOKBACK_BLOCKS
       let fromBlock: bigint;
       if (cached?.lastScannedBlock) {
         fromBlock = BigInt(cached.lastScannedBlock) + 1n;
@@ -70,12 +81,10 @@ export function useActivityHistory(decimals: number) {
         fromBlock = deployBlock > lookbackStart ? deployBlock : lookbackStart;
       }
 
-      // If already up to date, return cached items immediately
       if (fromBlock > toBlock) {
         return cached?.items ?? [];
       }
 
-      // Fetch only NEW logs since last scan
       const newLogsRaw = await fetchLogsInChunks(
         publicClient,
         { address: routerAddress, abi: CONTRACTS.yieldRouter.abi },
@@ -85,11 +94,13 @@ export function useActivityHistory(decimals: number) {
 
       const addressLower = address.toLowerCase();
 
-      const filteredLogs = newLogsRaw.filter((log) => {
+      // Cast raw logs to ParsedYieldLog to resolve TS2339
+      const parsedLogs = newLogsRaw as unknown as ParsedYieldLog[];
+
+      const filteredLogs = parsedLogs.filter((log) => {
         const eventName = log.eventName;
         if (eventName !== "Deposited" && eventName !== "Withdrawn") return false;
-        const args = log.args as { user?: Address; amount?: bigint; venue?: number };
-        return args?.user?.toLowerCase() === addressLower;
+        return log.args?.user?.toLowerCase() === addressLower;
       });
 
       let newItems: ActivityItem[] = [];
@@ -111,15 +122,14 @@ export function useActivityHistory(decimals: number) {
         const timestampByBlock = new Map(blocks.map((b) => [b.number, b.timestamp]));
 
         newItems = filteredLogs.map((log) => {
-          const args = log.args as { user: Address; amount: bigint; venue: number };
           const blockTimestamp = log.blockNumber ? timestampByBlock.get(log.blockNumber) : undefined;
           const isDeposit = log.eventName === "Deposited";
 
           return {
             id: `${log.transactionHash ?? "unknown"}-${log.logIndex ?? "unknown"}`,
             type: isDeposit ? "Deposit" : "Withdraw",
-            amount: Number(formatUnits(args.amount, decimals)),
-            protocol: venueNameFromIndex(args.venue ?? 0),
+            amount: Number(formatUnits(log.args.amount ?? 0n, decimals)),
+            protocol: venueNameFromIndex(log.args.venue ?? 0),
             timestamp: blockTimestamp
               ? new Date(Number(blockTimestamp) * 1000).toISOString()
               : new Date().toISOString(),
@@ -128,7 +138,6 @@ export function useActivityHistory(decimals: number) {
         });
       }
 
-      // Merge new items with cached items and deduplicate
       const existingItems = cached?.items ?? [];
       const mergedMap = new Map<string, ActivityItem>();
 
@@ -140,7 +149,6 @@ export function useActivityHistory(decimals: number) {
         (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
       );
 
-      // Save updated history and last block position
       saveStoredHistory(address, routerAddress, {
         lastScannedBlock: toBlock.toString(),
         items: mergedItems,
