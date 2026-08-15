@@ -31,8 +31,6 @@ export default function Dashboard() {
   const chainId = useChainId();
   const [activeTab, setActiveTab] = useState<Tab>("Dashboard");
 
-  // No wallet connected — send the visitor back to the landing page rather
-  // than showing an empty dashboard.
   useEffect(() => {
     if (!isConnected) {
       navigate("/");
@@ -105,6 +103,24 @@ export default function Dashboard() {
             </button>
           </div>
         </div>
+
+        {/* Mobile Navigation Bar */}
+        <div className="flex sm:hidden overflow-x-auto gap-2 px-4 pb-3 pt-1 border-t border-border/50">
+          {TABS.map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={`whitespace-nowrap rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                activeTab === tab
+                  ? "bg-primary-blue/10 text-primary-blue"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
       </header>
 
       <main className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8">
@@ -156,12 +172,6 @@ export default function Dashboard() {
   );
 }
 
-/**
- * Total Deposited, Current Best APY, Reputation Tier, and Est. Annual
- * Yield — all read live from YieldRouter. Est. Annual Yield is computed
- * client-side as depositedAmount * currentAPY, since the contract doesn't
- * expose that product directly.
- */
 function StatRow({
   address,
   onWrongNetwork,
@@ -193,26 +203,23 @@ function StatRow({
     query: { enabled },
   });
 
-  // Fetch historical APY data - MUST be called before any early returns to preserve Hooks order
   const {
     data: historicalData,
     isLoading: historicalLoading,
-    error: historicalError
+    error: historicalError,
   } = useHistoricalData();
 
   if (!isDeployed) {
     return (
       <StatNotice>
-        Contracts aren't deployed yet — see the APY card below for setup
-        steps.
+        Contracts aren't deployed yet — see the APY card below for setup steps.
       </StatNotice>
     );
   }
   if (onWrongNetwork) {
     return (
       <StatNotice>
-        Switch your wallet to Flare Coston2 (chain ID 114) to see your
-        stats.
+        Switch your wallet to Flare Coston2 (chain ID 114) to see your stats.
       </StatNotice>
     );
   }
@@ -252,10 +259,10 @@ function StatRow({
   const reputationTier = tierNameFromIndex(Number(tierRaw));
   const estimatedAnnualYield = totalDeposited * (currentBestApy / 100);
 
-  // Calculate tier progress
+  // Scaled tier calculation to preserve sub-day accuracy
   const depositAmount = depositRecord[0];
-  const daysHeld = depositRecord[1] > 0 ? (Math.max(0, (Date.now() / 1000) - Number(depositRecord[1])) / (24 * 60 * 60)) : 0;
-  const currentScore = depositAmount * BigInt(Math.floor(daysHeld));
+  const daysHeld = depositRecord[1] > 0 ? Math.max(0, (Date.now() / 1000 - Number(depositRecord[1])) / 86400) : 0;
+  const currentScore = (depositAmount * BigInt(Math.floor(daysHeld * 1000))) / 1000n;
 
   const tierProgress = calculateTierProgress(
     currentScore,
@@ -264,7 +271,6 @@ function StatRow({
     goldThreshold
   );
 
-  // Helper function to get tier progress class name
   const getTierProgressClassName = (progress: number): string => {
     return progress >= 80
       ? "text-success-green"
@@ -273,130 +279,151 @@ function StatRow({
       : "text-text-muted";
   };
 
-  return ( <>
-    <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <StatCard
-        label="Total Deposited"
-        value={`${totalDeposited.toLocaleString(undefined, {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })} FXRP`}
-      />
-      <StatCard
-        label="Current Best APY"
-        value={`${currentBestApy.toFixed(2)}%`}
-        valueClassName="text-success-green"
-      />
-      <StatCard label="Reputation Tier" value={reputationTier} />
-      <StatCard
-        label="Est. Annual Yield"
-        value={`${estimatedAnnualYield.toLocaleString(undefined, {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })} FXRP`}
-      />
-    </div>
+  // Find dynamic max APY for chart bar scaling
+  const maxHistoricalAPY = Math.max(
+    10,
+    ...(historicalData?.apyHistory?.map((p) => Math.max(p.kineticAPY, p.morphoAPY, p.bestAPY)) || [10])
+  );
 
-    {/* Additional metrics row */}
-    <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <StatCard
-        label="To Next Tier"
-        value={`${tierProgress.progressToNext}%`}
-        valueClassName={getTierProgressClassName(tierProgress.progressToNext)}
-      >
-        {tierProgress.nextTierName}
-      </StatCard>
-      <StatCard
-        label="Monthly Yield"
-        value={`${(estimatedAnnualYield / 12).toLocaleString(undefined, {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })} FXRP`}
-      />
-      <StatCard
-        label="Weekly Yield"
-        value={`${(estimatedAnnualYield / 52).toLocaleString(undefined, {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })} FXRP`}
-      />
-      <StatCard
-        label="Daily Yield"
-        value={`${(estimatedAnnualYield / 365).toLocaleString(undefined, {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })} FXRP`}
-      />
-    </div>
-
-    {/* Historical APY Trend */}
-    <div className="mb-6 sm:mb-8">
-      <h3 className="mb-3 sm:mb-4 font-display text-base font-bold text-text-primary">
-        APY Trend (24h)
-      </h3>
-      <div className="rounded-xl border border-border bg-bg-base p-4 sm:p-6">
-        {historicalLoading ? (
-          <div className="text-center py-6 sm:py-8">
-            <div className="h-4 w-4 animate-pulse rounded bg-bg-surface mx-auto mb-3 sm:mb-4"></div>
-            <p className="text-sm text-text-muted">Loading historical data...</p>
-          </div>
-        ) : historicalError ? (
-          <p className="text-center text-danger-red">
-            Error loading historical data: {historicalError?.message || 'Unknown error'}
-          </p>
-        ) : Array.isArray(historicalData?.apyHistory) && historicalData.apyHistory.length > 0 ? (
-          <div className="relative w-full max-h-[350px] overflow-y-auto pr-2">
-            {/* APY Points and Labels - Removed absolute positioning to prevent overlap */}
-            <div className="flex flex-col gap-4">
-              {historicalData.apyHistory.map((point, index) => {
-                const isLast = index === historicalData.apyHistory.length - 1;
-                const kineticHeight = ((point.kineticAPY / 10) * 100);
-                const morphoHeight = ((point.morphoAPY / 10) * 100);
-                const bestHeight = ((point.bestAPY / 10) * 100);
-
-                return (
-                  <div key={index} className="flex flex-col items-start relative w-full">
-                    {/* Hour label */}
-                    {!isLast && (
-                      <span className="text-xs text-text-muted mb-1">
-                        {new Date(point.timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
-                      </span>
-                    )}
-
-                    {/* APY bars container - gave it a set visual height for the bars */}
-                    <div className="relative w-full h-8 bg-bg-surface/20 rounded">
-                      {/* Kinetic bar */}
-                      <div className="absolute left-0 bottom-0 w-1/3 bg-primary-blue/30"
-                           style={{ height: `${kineticHeight}%` }}></div>
-                      {/* Morpho bar */}
-                      <div className="absolute left-1/3 bottom-0 w-1/3 bg-success-green/30"
-                           style={{ height: `${morphoHeight}%` }}></div>
-                      {/* Best bar */}
-                      <div className="absolute left-2/3 bottom-0 w-1/3 bg-accent-teal/30"
-                           style={{ height: `${bestHeight}%` }}></div>
-                    </div>
-
-                    {/* Last point labels */}
-                    {isLast && (
-                      <div className="mt-2 flex justify-between w-full text-xs font-medium">
-                        <span>Kinetic: {point.kineticAPY.toFixed(2)}%</span>
-                        <span>Morpho: {point.morphoAPY.toFixed(2)}%</span>
-                        <span>Best: {point.bestAPY.toFixed(2)}%</span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : (
-          <p className="text-center text-text-muted py-6 sm:py-8">
-            No historical data available
-          </p>
-        )}
+  return (
+    <>
+      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label="Total Deposited"
+          value={`${totalDeposited.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })} FXRP`}
+        />
+        <StatCard
+          label="Current Best APY"
+          value={`${currentBestApy.toFixed(2)}%`}
+          valueClassName="text-success-green"
+        />
+        <StatCard label="Reputation Tier" value={reputationTier} />
+        <StatCard
+          label="Est. Annual Yield"
+          value={`${estimatedAnnualYield.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })} FXRP`}
+        />
       </div>
-    </div>
-  </> );
+
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label="To Next Tier"
+          value={`${tierProgress.progressToNext}%`}
+          valueClassName={getTierProgressClassName(tierProgress.progressToNext)}
+        >
+          {tierProgress.nextTierName}
+        </StatCard>
+        <StatCard
+          label="Monthly Yield"
+          value={`${(estimatedAnnualYield / 12).toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })} FXRP`}
+        />
+        <StatCard
+          label="Weekly Yield"
+          value={`${(estimatedAnnualYield / 52).toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })} FXRP`}
+        />
+        <StatCard
+          label="Daily Yield"
+          value={`${(estimatedAnnualYield / 365).toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })} FXRP`}
+        />
+      </div>
+
+      {/* Historical APY Trend */}
+      <div className="mb-6 sm:mb-8">
+        <h3 className="mb-3 sm:mb-4 font-display text-base font-bold text-text-primary">
+          APY Trend (24h)
+        </h3>
+        <div className="rounded-xl border border-border bg-bg-base p-4 sm:p-6">
+          {historicalLoading ? (
+            <div className="text-center py-6 sm:py-8">
+              <div className="h-4 w-4 animate-pulse rounded bg-bg-surface mx-auto mb-3 sm:mb-4"></div>
+              <p className="text-sm text-text-muted">Loading historical data...</p>
+            </div>
+          ) : historicalError ? (
+            <p className="text-center text-danger-red text-sm">
+              Error loading historical data: {historicalError?.message || "Unknown error"}
+            </p>
+          ) : Array.isArray(historicalData?.apyHistory) && historicalData.apyHistory.length > 0 ? (
+            <div className="relative w-full max-h-[350px] overflow-y-auto pr-2">
+              <div className="flex flex-col gap-4">
+                {historicalData.apyHistory.map((point, index) => {
+                  const isLast = index === historicalData.apyHistory.length - 1;
+                  const kineticWidth = Math.min(100, (point.kineticAPY / maxHistoricalAPY) * 100);
+                  const morphoWidth = Math.min(100, (point.morphoAPY / maxHistoricalAPY) * 100);
+                  const bestWidth = Math.min(100, (point.bestAPY / maxHistoricalAPY) * 100);
+
+                  return (
+                    <div key={index} className="flex flex-col gap-1.5 w-full">
+                      <div className="flex justify-between items-center text-xs text-text-muted">
+                        <span>
+                          {new Date(point.timestamp).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                        <span className="font-mono text-[11px] text-text-primary">
+                          Best: {point.bestAPY.toFixed(2)}%
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 h-3 bg-bg-surface/30 rounded p-0.5">
+                        <div className="w-full bg-bg-surface rounded overflow-hidden">
+                          <div
+                            className="h-full bg-primary-blue transition-all"
+                            style={{ width: `${kineticWidth}%` }}
+                            title={`Kinetic: ${point.kineticAPY.toFixed(2)}%`}
+                          />
+                        </div>
+                        <div className="w-full bg-bg-surface rounded overflow-hidden">
+                          <div
+                            className="h-full bg-success-green transition-all"
+                            style={{ width: `${morphoWidth}%` }}
+                            title={`Morpho: ${point.morphoAPY.toFixed(2)}%`}
+                          />
+                        </div>
+                        <div className="w-full bg-bg-surface rounded overflow-hidden">
+                          <div
+                            className="h-full bg-accent-teal transition-all"
+                            style={{ width: `${bestWidth}%` }}
+                            title={`Best: ${point.bestAPY.toFixed(2)}%`}
+                          />
+                        </div>
+                      </div>
+
+                      {isLast && (
+                        <div className="mt-1 flex justify-between w-full text-xs font-medium text-text-muted">
+                          <span className="text-primary-blue">Kinetic: {point.kineticAPY.toFixed(2)}%</span>
+                          <span className="text-success-green">Morpho: {point.morphoAPY.toFixed(2)}%</span>
+                          <span className="text-accent-teal">Best: {point.bestAPY.toFixed(2)}%</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <p className="text-center text-text-muted py-6 sm:py-8 text-sm">
+              No historical data available
+            </p>
+          )}
+        </div>
+      </div>
+    </>
+  );
 }
 
 function StatNotice({ children }: { children: ReactNode }) {

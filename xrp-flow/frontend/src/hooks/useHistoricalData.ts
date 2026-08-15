@@ -74,7 +74,8 @@ export function useHistoricalData() {
       }
 
       // Calculate safe fromBlock to prevent RPC range limit errors (max 5000 blocks back)
-      const MAX_BLOCK_RANGE = 5000n;
+      // Note: Coston2 public RPC can be very strict. If 1000 fails, try lowering this to 100n.
+      const MAX_BLOCK_RANGE = 29n;
       const configuredDeployBlock = deploymentInfo.deployBlock ? BigInt(deploymentInfo.deployBlock) : 0n;
 
       let fromBlock: bigint;
@@ -88,6 +89,15 @@ export function useHistoricalData() {
       let logs: any[] = [];
       if (toBlock > 0n && CONTRACTS.yieldRouter.address) {
         try {
+          
+          // Debugger safely moved OUTSIDE of the object literal
+          console.log("RPC Payload Check:", {
+            address: CONTRACTS.yieldRouter.address,
+            fromBlock: fromBlock.toString(),
+            toBlock: toBlock.toString(),
+            rangeSize: (toBlock - fromBlock).toString(),
+          });
+
           const events = await publicClient.getContractEvents({
             address: CONTRACTS.yieldRouter.address,
             abi: CONTRACTS.yieldRouter.abi,
@@ -95,6 +105,7 @@ export function useHistoricalData() {
             fromBlock,
             toBlock
           });
+          
           logs = Array.isArray(events) ? events : [];
         } catch (err) {
           console.error("[useHistoricalData] getContractEvents failed", { error: err });
