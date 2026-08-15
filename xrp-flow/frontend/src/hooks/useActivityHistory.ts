@@ -93,8 +93,6 @@ export function useActivityHistory(decimals: number) {
       );
 
       const addressLower = address.toLowerCase();
-
-      // Cast raw logs to ParsedYieldLog to resolve TS2339
       const parsedLogs = newLogsRaw as unknown as ParsedYieldLog[];
 
       const filteredLogs = parsedLogs.filter((log) => {
@@ -110,7 +108,9 @@ export function useActivityHistory(decimals: number) {
           new Set(filteredLogs.map((log) => log.blockNumber))
         ).filter((bn): bn is bigint => bn !== null);
 
-        let blocks = [];
+        type BlockResult = Awaited<ReturnType<typeof publicClient.getBlock>>;
+        let blocks: BlockResult[] = [];
+
         try {
           blocks = await Promise.all(
             uniqueBlockNumbers.map((blockNumber) => publicClient.getBlock({ blockNumber }))
