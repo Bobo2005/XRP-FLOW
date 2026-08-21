@@ -60,7 +60,9 @@ export function useActivityHistory(decimals: number) {
     enabled,
     staleTime: 5 * 60 * 1000, // 5 minutes - don't refetch if data is fresh
   gcTime: 1000 * 60 * 5, // 10 minutes - keep in memory longer
-  retry: 2,
+  refetchOnWindowFocus: false, // Prevents instant RPC spam on tab switch
+  refetchOnReconnect: false,
+  retry: 1,
     queryFn: async () => {
       if (!publicClient || !address) return [];
 
