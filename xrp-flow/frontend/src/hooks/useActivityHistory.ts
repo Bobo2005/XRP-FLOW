@@ -6,9 +6,9 @@ import { coston2 } from "../wagmi";
 import type { ActivityItem } from "../types";
 
 const MAX_BLOCK_RANGE = 30n;
-const CHUNK_CONCURRENCY = 1;
-const BATCH_DELAY_MS = 300;
-const INITIAL_LOOKBACK_BLOCKS = 3000n;
+const CHUNK_CONCURRENCY =4;
+const BATCH_DELAY_MS = 50;
+const INITIAL_LOOKBACK_BLOCKS = 500n;
 
 interface StoredHistory {
   lastScannedBlock: string;
@@ -58,6 +58,9 @@ export function useActivityHistory(decimals: number) {
   return useQuery({
     queryKey: ["activity-history", address, CONTRACTS.yieldRouter.address, chainId],
     enabled,
+    staleTime: 5 * 60 * 1000, // 5 minutes - don't refetch if data is fresh
+  cacheTime: 10 * 60 * 1000, // 10 minutes - keep in memory longer
+  retry: 2,
     queryFn: async () => {
       if (!publicClient || !address) return [];
 
@@ -149,11 +152,19 @@ export function useActivityHistory(decimals: number) {
         (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
       );
 
-      saveStoredHistory(address, routerAddress, {
-        lastScannedBlock: toBlock.toString(),
-        items: mergedItems,
-      });
+      // saveStoredHistory(address, routerAddress, {
+      //   lastScannedBlock: toBlock.toString(),
+      //   items: mergedItems,
+      // });
+      const shouldSave = newItems.length > 0 ||
+                  Date.now() - (parseInt(cached?.lastScannedBlock || "0") * 1000) > 5 * 60 * 1000; // 5 min
 
+if (shouldSave) {
+  saveStoredHistory(address, routerAddress, {
+    lastScannedBlock: toBlock.toString(),
+    items: mergedItems,
+  });
+}
       return mergedItems;
     },
   });

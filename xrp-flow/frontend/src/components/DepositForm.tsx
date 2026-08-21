@@ -2,9 +2,11 @@
 import { useState, useEffect } from "react";
 import { useAccount, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { parseUnits, formatUnits } from "viem";
-import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { CheckCircle2, AlertCircle, Loader2, Fuel } from "lucide-react";
 import { CONTRACTS, isDeployed } from "../contracts";
 import { describeContractError } from "../lib/errors";
+// Adjust this import path to wherever your useYieldRouter hook is located
+import { useYieldRouter } from "../hooks/useYieldRouter"; 
 
 type FormMode = "deposit" | "withdraw";
 
@@ -19,6 +21,16 @@ export default function DepositForm() {
   const [submittedAmount, setSubmittedAmount] = useState<string>("");
   const [submittedMode, setSubmittedMode] = useState<FormMode>("deposit");
 
+  // Gas Estimation State
+  const [gasEstimate, setGasEstimate] = useState<string | null>(null);
+  const [isEstimatingGas, setIsEstimatingGas] = useState<boolean>(false);
+  
+  const { 
+    estimateApproveGas, 
+    estimateDepositToVenueGas, 
+    estimateWithdrawGas 
+  } = useYieldRouter();
+
   // Reset success message whenever user starts typing or switches modes
   const handleAmountChange = (val: string) => {
     setAmount(val);
@@ -28,6 +40,7 @@ export default function DepositForm() {
   const handleModeSwitch = (newMode: FormMode) => {
     setMode(newMode);
     setAmount("");
+    setGasEstimate(null);
     if (successMessage) setSuccessMessage(null);
   };
 
@@ -55,6 +68,52 @@ export default function DepositForm() {
   const { data: hash, isPending, error: writeError, writeContract } = useWriteContract();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
+  // Debounced Gas Estimation Effect
+  useEffect(() => {
+    let isActive = true;
+    const fetchGas = async () => {
+      if (!parsedAmount || parsedAmount <= 0n) {
+        setGasEstimate(null);
+        return;
+      }
+
+      setIsEstimatingGas(true);
+      setGasEstimate(null);
+
+      try {
+        let estimate;
+        if (mode === "deposit") {
+          if (needsApproval) {
+            estimate = await estimateApproveGas(parsedAmount);
+          } else {
+            const venueId = venue === "kinetic" ? 0 : 1;
+            estimate = await estimateDepositToVenueGas(parsedAmount, venueId);
+          }
+        } else {
+          estimate = await estimateWithdrawGas(parsedAmount);
+        }
+
+        if (isActive && estimate) {
+          // Format to 6 decimal places max for cleaner UI
+          const formatted = Number(estimate.formattedCost).toLocaleString(undefined, {
+            maximumFractionDigits: 6
+          });
+          setGasEstimate(formatted);
+        }
+      } catch (err) {
+        console.warn("Could not estimate gas", err);
+      } finally {
+        if (isActive) setIsEstimatingGas(false);
+      }
+    };
+
+    const debounceTimer = setTimeout(fetchGas, 500); // 500ms debounce
+    return () => {
+      isActive = false;
+      clearTimeout(debounceTimer);
+    };
+  }, [parsedAmount, mode, venue, needsApproval, estimateApproveGas, estimateDepositToVenueGas, estimateWithdrawGas]);
+
   // Handle successful transaction execution
   useEffect(() => {
     if (isSuccess && submittedAmount) {
@@ -65,6 +124,7 @@ export default function DepositForm() {
 
       setSuccessMessage(`You have successfully ${actionText} ${formattedAmt} FXRP`);
       setAmount("");
+      setGasEstimate(null);
       refetch(); // Refresh wallet & vault balances
     }
   }, [isSuccess, submittedAmount, submittedMode, refetch]);
@@ -85,10 +145,11 @@ export default function DepositForm() {
           args: [CONTRACTS.yieldRouter.address, parsedAmount],
         });
       } else {
+        const venueId = venue === "kinetic" ? 0 : 1;
         writeContract({
           ...CONTRACTS.yieldRouter,
-          functionName: "deposit",
-          args: [parsedAmount],
+          functionName: "depositToVenue",
+          args: [parsedAmount, venueId],
         });
       }
     } else {
@@ -214,6 +275,23 @@ export default function DepositForm() {
               MAX
             </button>
           </div>
+        </div>
+        
+        {/* Network Fee Estimation UI */}
+        <div className="flex items-center justify-between px-1 h-6">
+          <span className="text-xs text-text-muted flex items-center gap-1.5">
+            <Fuel className="w-3 h-3" />
+            Network Fee
+          </span>
+          <span className="text-xs font-mono text-text-primary">
+            {isEstimatingGas ? (
+               <Loader2 className="w-3 h-3 animate-spin inline text-text-muted" />
+            ) : gasEstimate ? (
+               `~${gasEstimate} C2FLR`
+            ) : (
+               "--"
+            )}
+          </span>
         </div>
 
         <button

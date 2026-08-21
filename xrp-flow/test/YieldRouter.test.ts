@@ -384,4 +384,150 @@ describe("YieldRouter", () => {
         .withArgs(user.address);
     });
   });
+
+  describe("reputation history", () => {
+    const DAY = 24 * 60 * 60;
+
+    it("returns empty history for new user", async () => {
+      const history = await router.getReputationHistory(user.address);
+      expect(history.length).to.equal(0);
+    });
+
+    it("records snapshot on first deposit", async () => {
+      const amount = ethers.parseEther("100");
+      await router.connect(user).deposit(amount);
+
+      const history = await router.getReputationHistory(user.address);
+      expect(history.length).to.equal(1);
+
+      const snapshot = history[0];
+      expect(snapshot.score).to.equal(0n); // score is 0 immediately after deposit (0 days held)
+      expect(snapshot.tier).to.equal(0); // None tier
+      expect(snapshot.timestamp).to.be.gt(0);
+    });
+
+    it("records snapshot on withdrawal", async () => {
+      const depositAmount = ethers.parseEther("100");
+      await router.connect(user).deposit(depositAmount);
+
+      // Wait 1 day to have some score
+      await time.increase(DAY);
+
+      const withdrawAmount = ethers.parseEther("50");
+      await router.connect(user).withdraw(withdrawAmount);
+
+      const history = await router.getReputationHistory(user.address);
+      expect(history.length).to.equal(2); // Initial deposit + withdrawal
+
+      const withdrawalSnapshot = history[1];
+      // After 1 day holding 50 FXRP: 50 * 1 = 50 wei*days
+      expect(withdrawalSnapshot.score).to.equal(ethers.parseEther("50"));
+      expect(withdrawalSnapshot.tier).to.equal(0); // Still None tier
+    });
+
+    it("records snapshot when score changes significantly", async () => {
+      const initialDeposit = ethers.parseEther("100");
+      console.log("DEBUG: Initial deposit amount:", initialDeposit.toString());
+      await router.connect(user).deposit(initialDeposit);
+
+      // Check deposit after initial deposit
+      const depositAfterInitial = await router.deposits(user.address);
+      console.log("DEBUG: After initial deposit - amount:", depositAfterInitial.amount.toString(), "timestamp:", depositAfterInitial.timestamp.toString());
+
+      // Wait 1 day
+      await time.increase(DAY);
+
+      // Make a small deposit that should not trigger snapshot (less than 1% change)
+      const smallDeposit = ethers.parseEther("1"); // 1% of 100 FXRP
+      console.log("DEBUG: Small deposit amount:", smallDeposit.toString());
+      await router.connect(user).deposit(smallDeposit);
+
+      let history = await router.getReputationHistory(user.address);
+      // DEBUG: Print scores
+      if (history.length > 0) {
+        console.log("DEBUG: After small deposit - history[0].score =", history[0].score.toString());
+      }
+
+      // Check deposit after small deposit
+      const depositAfterSmall = await router.deposits(user.address);
+      console.log("DEBUG: After small deposit - amount:", depositAfterSmall.amount.toString(), "timestamp:", depositAfterSmall.timestamp.toString());
+
+      // Now make a larger deposit that should trigger snapshot
+      const largeDeposit = ethers.parseEther("10"); // 10% of 100 FXRP
+      console.log("DEBUG: Large deposit amount:", largeDeposit.toString());
+      await router.connect(user).deposit(largeDeposit);
+
+      history = await router.getReputationHistory(user.address);
+      // DEBUG: Print scores
+      console.log("DEBUG: After large deposit - history length =", history.length);
+      if (history.length > 0) {
+        console.log("DEBUG: history[0].score =", history[0].score.toString());
+      }
+      if (history.length > 1) {
+        console.log("DEBUG: history[1].score =", history[1].score.toString());
+      }
+
+      // Check deposit after large deposit
+      const depositAfterLarge = await router.deposits(user.address);
+      console.log("DEBUG: After large deposit - amount:", depositAfterLarge.amount.toString(), "timestamp:", depositAfterLarge.timestamp.toString());
+
+      expect(history.length).to.equal(2); // Initial + large deposit
+
+      const largeDepositSnapshot = history[1];
+      // After 1 day holding 110 FXRP: (110 * 1e18 wei) * 1 day = 1.11e20 wei*days
+      expect(largeDepositSnapshot.score).to.equal(ethers.parseEther("110") * 10 ** 18);
+    });
+
+    it("records snapshot when tier changes", async () => {
+      // Deposit amount that will reach Bronze threshold after 7 days
+      const bronzeAmount = ethers.parseEther("100");
+      await router.connect(user).deposit(bronzeAmount);
+
+      // Wait 6 days - still None tier
+      await time.increase(6 * DAY);
+      let history = await router.getReputationHistory(user.address);
+      expect(history.length).to.equal(1);
+
+      // Wait 1 more day - now Bronze tier
+      await time.increase(DAY);
+
+      // Trigger a snapshot by making a small deposit (or just check that tier change is detected)
+      const tinyDeposit = ethers.parseEther("1");
+      await router.connect(user).deposit(tinyDeposit);
+
+      history = await router.getReputationHistory(user.address);
+      expect(history.length).to.equal(2);
+
+      const bronzeSnapshot = history[1];
+      // After 7 days holding 101 FXRP: well above Bronze threshold
+      expect(bronzeSnapshot.tier).to.equal(1); // Bronze tier
+    });
+
+    it("returns snapshots in chronological order", async () => {
+      const amount = ethers.parseEther("50");
+
+      // Initial deposit
+      await router.connect(user).deposit(amount);
+
+      // Wait 1 day
+      await time.increase(DAY);
+
+      // Second deposit
+      await router.connect(user).deposit(amount);
+
+      // Wait 1 more day
+      await time.increase(DAY);
+
+      // Withdrawal
+      await router.connect(user).withdraw(amount);
+
+      const history = await router.getReputationHistory(user.address);
+      expect(history.length).to.equal(4);
+
+      // Check that timestamps are in ascending order
+      for (let i = 1; i < history.length; i++) {
+        expect(history[i].timestamp).to.be.gt(history[i-1].timestamp);
+      }
+    });
+  });
 });

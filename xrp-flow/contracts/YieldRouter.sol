@@ -46,6 +46,16 @@ contract YieldRouter is Ownable, ReentrancyGuard {
         uint256 timestamp;
     }
 
+    /// @notice Tracks historical reputation snapshots for a user.
+    /// @param timestamp The block timestamp when the snapshot was taken.
+    /// @param score The reputation score (amount * days held) at that timestamp.
+    /// @param tier The reputation tier at that timestamp.
+    struct ReputationSnapshot {
+        uint256 timestamp;
+        uint256 score;
+        ReputationTier tier;
+    }
+
     // ---------------------------------------------------------------------
     // State
     // ---------------------------------------------------------------------
@@ -63,7 +73,6 @@ contract YieldRouter is Ownable, ReentrancyGuard {
     ///      points at MockMorpho.
     IMorpho public immutable morpho;
 
-
     /// @notice The Morpho Blue market this router supplies/withdraws
     ///         against. Left at its zero-valued default until the owner
     ///         calls setMorphoMarketParams() — deposits refuse to route to
@@ -76,6 +85,12 @@ contract YieldRouter is Ownable, ReentrancyGuard {
     /// @notice The venue each user's deposit is routed into, fixed at their
     ///         first deposit. Meaningless while deposits[user].amount == 0.
     mapping(address => Venue) public userVenue;
+
+    /// @notice Tracks whether a user is currently using Morpho (for internal tracking).
+    mapping(address => bool) public userUsingMorpho;
+
+    /// @notice Historical reputation snapshots for each user.
+    mapping(address => ReputationSnapshot[]) public reputationHistory;
 
     /// @notice Placeholder Kinetic APY (scaled by 1e18, so 1e18 == 100%)
     ///         until live Kinetic rate reading is wired up.
@@ -96,6 +111,152 @@ contract YieldRouter is Ownable, ReentrancyGuard {
     /// @notice Reputation score threshold (amount * days held) required to
     ///         reach Gold. Tunable by the owner.
     uint256 public goldThreshold;
+
+    // ---------------------------------------------------------------------
+    // Views and internal helpers (defined first so they can be used elsewhere)
+    // ---------------------------------------------------------------------
+
+    /// @notice Computes a user's current reputation tier from their
+    ///         deposited amount and how long it has been held.
+    /// @dev Score = amount held (wei) * days held. Uses only data already
+    ///      stored on this contract — no external oracle required. Tier
+    ///      thresholds are owner-tunable via setThresholds().
+    /// @param user The address to compute the reputation tier for.
+    /// @return tier The user's current ReputationTier.
+    function getReputationTier(address user) external view returns (ReputationTier) {
+        Deposit storage userDeposit = deposits[user];
+        if (userDeposit.amount == 0 || userDeposit.timestamp == 0) {
+            return ReputationTier.None;
+        }
+
+        uint256 daysHeld = (block.timestamp - userDeposit.timestamp) / 86400;
+        uint256 score = userDeposit.amount * daysHeld;
+
+        if (score >= goldThreshold) return ReputationTier.Gold;
+        if (score >= silverThreshold) return ReputationTier.Silver;
+        if (score >= bronzeThreshold) return ReputationTier.Bronze;
+        return ReputationTier.None;
+    }
+
+    /// @notice Returns the best currently-available APY across venues, for
+    ///         dashboard display.
+    /// @dev Placeholder — returns the higher of two stored/mock rates set
+    ///      via setMockAPY() until live on-chain rate reading from Kinetic
+    ///      and Morpho is wired up (see the TODOs in IKinetic.sol and
+    ///      IMorpho.sol — neither exposes a simple APY view the way this
+    ///      function's return value implies, so a real implementation
+    ///      needs additional conversion logic).
+    /// @return apy The current best placeholder APY, scaled by 1e18.
+    function getCurrentAPY() external view returns (uint256 apy) {
+        return kineticMockAPY > morphoMockAPY ? kineticMockAPY : morphoMockAPY;
+    }
+
+    /// @notice Returns which venue currently offers the better mock rate.
+    /// @dev Ties resolve to Kinetic. This is a view of the mock rates only
+    ///      — see getCurrentAPY()'s caveats.
+    function getBestVenue() public view returns (Venue) {
+        return morphoMockAPY > kineticMockAPY ? Venue.Morpho : Venue.Kinetic;
+    }
+
+    /// @notice Returns the reputation history for a user.
+    /// @dev Returns an array of ReputationSnapshot structs, ordered from oldest to newest.
+    /// @param user The address to get the reputation history for.
+    /// @return reputationHistory Array of reputation snapshots for the user.
+    function getReputationHistory(address user) external view returns (ReputationSnapshot[] memory) {
+        return reputationHistory[user];
+    }
+
+    /// @notice Calculates the current reputation score for a user.
+    /// @dev Score = amount held (wei) * days held. Returns 0 if no deposit or timestamp.
+    /// @param user The address to calculate the score for.
+    /// @return score The current reputation score (amount * days held).
+    function _calculateReputationScore(address user) internal view returns (uint256) {
+        Deposit storage userDeposit = deposits[user];
+        if (userDeposit.amount == 0 || userDeposit.timestamp == 0) {
+            return 0;
+        }
+
+        uint256 daysHeld = (block.timestamp - userDeposit.timestamp) / 86400;
+        return userDeposit.amount * daysHeld;
+    }
+
+    /// @notice Records a reputation snapshot if the score has changed significantly.
+    /// @dev Records a snapshot when:
+    ///      - No previous snapshot exists (first record)
+    ///      - The score has changed by at least 1% or 1e15 wei*days (whichever is larger)
+    ///      - The tier has changed
+    /// @param user The address to record the snapshot for.
+    function _recordReputationSnapshotIfChanged(address user) internal {
+        uint256 currentScore = _calculateReputationScore(user);
+        ReputationTier currentTier;
+        Deposit memory userDeposit = deposits[user];
+        if (userDeposit.amount == 0 || userDeposit.timestamp == 0) {
+            currentTier = ReputationTier.None;
+        } else {
+            uint256 daysHeld = (block.timestamp - userDeposit.timestamp) / 86400;
+            uint256 score = userDeposit.amount * daysHeld;
+
+            if (score >= goldThreshold) currentTier = ReputationTier.Gold;
+            else if (score >= silverThreshold) currentTier = ReputationTier.Silver;
+            else if (score >= bronzeThreshold) currentTier = ReputationTier.Bronze;
+            else currentTier = ReputationTier.None;
+        }
+
+        // Get the most recent snapshot if any
+        ReputationSnapshot[] memory history = reputationHistory[user];
+        if (history.length == 0) {
+            // First snapshot - always record
+            _recordReputationSnapshot(user, currentScore, currentTier);
+            return;
+        }
+
+        ReputationSnapshot memory lastSnapshot = history[history.length - 1];
+
+        // Check if we should record a new snapshot
+        bool shouldRecord = false;
+
+        // Always record if tier changed
+        if (lastSnapshot.tier != currentTier) {
+            shouldRecord = true;
+        }
+        // Otherwise check if score changed significantly
+        else {
+            uint256 scoreChange = currentScore > lastSnapshot.score
+                ? currentScore - lastSnapshot.score
+                : lastSnapshot.score - currentScore;
+
+            // Record if change is at least 1% or 1e15 wei*days (whichever is larger)
+            uint256 minChange = lastSnapshot.score > 0
+                ? (lastSnapshot.score / 100)  // 1% of last snapshot score
+                : 1e15;                       // Fixed minimum for zero score
+            if (minChange < 1e15) {
+                minChange = 1e15;  // Ensure minimum change is at least 1e15
+            }
+
+            if (scoreChange >= minChange) {
+                shouldRecord = true;
+            }
+        }
+
+        if (shouldRecord) {
+            _recordReputationSnapshot(user, currentScore, currentTier);
+        }
+    }
+
+    /// @notice Records a reputation snapshot for a user.
+    /// @dev Internal function to actually store the snapshot and emit event.
+    /// @param user The address to record the snapshot for.
+    /// @param score The reputation score to record.
+    /// @param tier The reputation tier to record.
+    function _recordReputationSnapshot(address user, uint256 score, ReputationTier tier) internal {
+        reputationHistory[user].push(ReputationSnapshot({
+            timestamp: block.timestamp,
+            score: score,
+            tier: tier
+        }));
+
+        emit ReputationSnapshotUpdated(user, block.timestamp, score, tier);
+    }
 
     // ---------------------------------------------------------------------
     // Events
@@ -174,6 +335,18 @@ contract YieldRouter is Ownable, ReentrancyGuard {
 
     /// @notice Emitted when a user's routing preference is updated by the owner.
     event UserRoutingUpdated(address indexed user, uint8 preference);
+
+    /// @notice Emitted when a user's reputation snapshot is recorded.
+    /// @param user The user whose reputation was recorded.
+    /// @param timestamp The block timestamp when the snapshot was taken.
+    /// @param score The reputation score (amount * days held) at that timestamp.
+    /// @param tier The reputation tier at that timestamp.
+    event ReputationSnapshotUpdated(
+        address indexed user,
+        uint256 timestamp,
+        uint256 score,
+        ReputationTier tier
+    );
 
     // ---------------------------------------------------------------------
     // Errors
@@ -279,7 +452,6 @@ contract YieldRouter is Ownable, ReentrancyGuard {
     ///      to the other venue, withdraw fully first, then deposit again
     ///      with the venue you want.
     /// @param amount The amount of FXRP to deposit.
-    /// @param venue The venue to deposit into.
     function depositToVenue(uint256 amount, Venue venue) external nonReentrant {
         if (amount == 0) revert ZeroAmount();
 
@@ -309,10 +481,8 @@ contract YieldRouter is Ownable, ReentrancyGuard {
             userDeposit.timestamp = block.timestamp;
             userVenue[msg.sender] = venue;
         } else {
-            // Volume-weighted average timestamp
-            uint256 oldWeight = userDeposit.amount * userDeposit.timestamp;
-            uint256 newWeight = amount * block.timestamp;
-            userDeposit.timestamp = (oldWeight + newWeight) / (userDeposit.amount + amount);
+            // Keep timestamp constant across top-up deposits
+            // so tier calculations reflect how long capital has been continuously deposited
         }
 
         userDeposit.amount += amount;
@@ -323,6 +493,9 @@ contract YieldRouter is Ownable, ReentrancyGuard {
         _supplyToVenue(venue, amount);
 
         emit Deposited(msg.sender, amount, userDeposit.amount, venue);
+
+        // Update reputation snapshot if changed
+        _recordReputationSnapshotIfChanged(msg.sender);
     }
 
     /// @notice Withdraws `amount` of FXRP from the user's venue and returns
@@ -357,6 +530,9 @@ contract YieldRouter is Ownable, ReentrancyGuard {
             userDeposit.timestamp = 0;
             userUsingMorpho[msg.sender] = false;
         }
+
+        // Update reputation snapshot if changed
+        _recordReputationSnapshotIfChanged(msg.sender);
 
         emit Withdrawn(msg.sender, amount, userDeposit.amount, venue);
     }
@@ -409,54 +585,6 @@ contract YieldRouter is Ownable, ReentrancyGuard {
     }
 
     // ---------------------------------------------------------------------
-    // Views
-    // ---------------------------------------------------------------------
-
-    /// @notice Computes a user's current reputation tier from their
-    ///         deposited amount and how long it has been held.
-    /// @dev Score = amount held (wei) * days held. Uses only data already
-    ///      stored on this contract — no external oracle required. Tier
-    ///      thresholds are owner-tunable via setThresholds().
-    /// @param user The address to compute the reputation tier for.
-    /// @return tier The user's current ReputationTier.
-    function getReputationTier(
-        address user
-    ) external view returns (ReputationTier tier) {
-        Deposit memory userDeposit = deposits[user];
-        if (userDeposit.amount == 0 || userDeposit.timestamp == 0) {
-            return ReputationTier.None;
-        }
-
-        uint256 daysHeld = (block.timestamp - userDeposit.timestamp) / 1 days;
-        uint256 score = userDeposit.amount * daysHeld;
-
-        if (score >= goldThreshold) return ReputationTier.Gold;
-        if (score >= silverThreshold) return ReputationTier.Silver;
-        if (score >= bronzeThreshold) return ReputationTier.Bronze;
-        return ReputationTier.None;
-    }
-
-    /// @notice Returns the best currently-available APY across venues, for
-    ///         dashboard display.
-    /// @dev Placeholder — returns the higher of two stored/mock rates set
-    ///      via setMockAPY() until live on-chain rate reading from Kinetic
-    ///      and Morpho is wired up (see the TODOs in IKinetic.sol and
-    ///      IMorpho.sol — neither exposes a simple APY view the way this
-    ///      function's return value implies, so a real implementation
-    ///      needs additional conversion logic).
-    /// @return apy The current best placeholder APY, scaled by 1e18.
-    function getCurrentAPY() external view returns (uint256 apy) {
-        return kineticMockAPY > morphoMockAPY ? kineticMockAPY : morphoMockAPY;
-    }
-
-    /// @notice Returns which venue currently offers the better mock rate.
-    /// @dev Ties resolve to Kinetic. This is a view of the mock rates only
-    ///      — see getCurrentAPY()'s caveats.
-    function getBestVenue() public view returns (Venue) {
-        return morphoMockAPY > kineticMockAPY ? Venue.Morpho : Venue.Kinetic;
-    }
-
-    // ---------------------------------------------------------------------
     // Internal
     // ---------------------------------------------------------------------
 
@@ -494,7 +622,7 @@ contract YieldRouter is Ownable, ReentrancyGuard {
     ///         getCurrentAPY() and getBestVenue().
     /// @dev Owner-only. Temporary until live rate reading replaces this.
     /// @param venue Which venue's placeholder rate to update.
-    /// @param newAPY The new placeholder APY, scaled by 1e18 (1e18 == 100%).
+    /// @param newAPY The new APY, scaled by 1e18 (1e18 == 100%).
     function setMockAPY(Venue venue, uint256 newAPY) external onlyOwner {
         if (venue == Venue.Kinetic) {
             kineticMockAPY = newAPY;

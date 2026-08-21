@@ -23,6 +23,20 @@ import type {
   TypedContractMethod,
 } from "../common";
 
+export declare namespace YieldRouter {
+  export type ReputationSnapshotStruct = {
+    timestamp: BigNumberish;
+    score: BigNumberish;
+    tier: BigNumberish;
+  };
+
+  export type ReputationSnapshotStructOutput = [
+    timestamp: bigint,
+    score: bigint,
+    tier: bigint
+  ] & { timestamp: bigint; score: bigint; tier: bigint };
+}
+
 export declare namespace IMorpho {
   export type MarketParamsStruct = {
     loanToken: AddressLike;
@@ -57,6 +71,7 @@ export interface YieldRouterInterface extends Interface {
       | "fxrp"
       | "getBestVenue"
       | "getCurrentAPY"
+      | "getReputationHistory"
       | "getReputationTier"
       | "goldThreshold"
       | "kinetic"
@@ -67,13 +82,13 @@ export interface YieldRouterInterface extends Interface {
       | "owner"
       | "rebalance"
       | "renounceOwnership"
+      | "reputationHistory"
       | "setMockAPY"
       | "setMorphoMarketParams"
       | "setThresholds"
-      | "setUseMorpho"
-      | "setUserRouting"
       | "silverThreshold"
       | "transferOwnership"
+      | "userUsingMorpho"
       | "userVenue"
       | "withdraw"
   ): FunctionFragment;
@@ -85,6 +100,8 @@ export interface YieldRouterInterface extends Interface {
       | "MorphoMarketParamsUpdated"
       | "OwnershipTransferred"
       | "Rebalanced"
+      | "ReputationSnapshotUpdated"
+      | "RoutingUpdated"
       | "ThresholdsUpdated"
       | "UserRoutingUpdated"
       | "Withdrawn"
@@ -116,6 +133,10 @@ export interface YieldRouterInterface extends Interface {
     values?: undefined
   ): string;
   encodeFunctionData(
+    functionFragment: "getReputationHistory",
+    values: [AddressLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "getReputationTier",
     values: [AddressLike]
   ): string;
@@ -144,6 +165,10 @@ export interface YieldRouterInterface extends Interface {
     values?: undefined
   ): string;
   encodeFunctionData(
+    functionFragment: "reputationHistory",
+    values: [AddressLike, BigNumberish]
+  ): string;
+  encodeFunctionData(
     functionFragment: "setMockAPY",
     values: [BigNumberish, BigNumberish]
   ): string;
@@ -156,24 +181,11 @@ export interface YieldRouterInterface extends Interface {
     values: [BigNumberish, BigNumberish, BigNumberish]
   ): string;
   encodeFunctionData(
-    functionFragment: "setUseMorpho",
-    values: [boolean]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "setUserRouting",
-    values: [AddressLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
     functionFragment: "silverThreshold",
     values?: undefined
   ): string;
   encodeFunctionData(
     functionFragment: "transferOwnership",
-    values: [AddressLike]
-  ): string;
-  encodeFunctionData(functionFragment: "useMorpho", values?: undefined): string;
-  encodeFunctionData(
-    functionFragment: "userRoutingPref",
     values: [AddressLike]
   ): string;
   encodeFunctionData(
@@ -209,6 +221,10 @@ export interface YieldRouterInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "getReputationHistory",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "getReputationTier",
     data: BytesLike
   ): Result;
@@ -236,7 +252,11 @@ export interface YieldRouterInterface extends Interface {
     functionFragment: "renounceOwnership",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(functionFragment: "setMorpho", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "reputationHistory",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(functionFragment: "setMockAPY", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "setMorphoMarketParams",
     data: BytesLike
@@ -246,19 +266,15 @@ export interface YieldRouterInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "setUseMorpho",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "setUserRouting",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "silverThreshold",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
     functionFragment: "transferOwnership",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "userUsingMorpho",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "userVenue", data: BytesLike): Result;
@@ -362,6 +378,44 @@ export namespace RebalancedEvent {
     amount: bigint;
     fromVenue: bigint;
     toVenue: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace ReputationSnapshotUpdatedEvent {
+  export type InputTuple = [
+    user: AddressLike,
+    timestamp: BigNumberish,
+    score: BigNumberish,
+    tier: BigNumberish
+  ];
+  export type OutputTuple = [
+    user: string,
+    timestamp: bigint,
+    score: bigint,
+    tier: bigint
+  ];
+  export interface OutputObject {
+    user: string;
+    timestamp: bigint;
+    score: bigint;
+    tier: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace RoutingUpdatedEvent {
+  export type InputTuple = [morpho: AddressLike, useMorpho: boolean];
+  export type OutputTuple = [morpho: string, useMorpho: boolean];
+  export interface OutputObject {
+    morpho: string;
+    useMorpho: boolean;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -494,6 +548,12 @@ export interface YieldRouter extends BaseContract {
 
   getCurrentAPY: TypedContractMethod<[], [bigint], "view">;
 
+  getReputationHistory: TypedContractMethod<
+    [user: AddressLike],
+    [YieldRouter.ReputationSnapshotStructOutput[]],
+    "view"
+  >;
+
   getReputationTier: TypedContractMethod<[user: AddressLike], [bigint], "view">;
 
   goldThreshold: TypedContractMethod<[], [bigint], "view">;
@@ -526,6 +586,18 @@ export interface YieldRouter extends BaseContract {
 
   renounceOwnership: TypedContractMethod<[], [void], "nonpayable">;
 
+  reputationHistory: TypedContractMethod<
+    [arg0: AddressLike, arg1: BigNumberish],
+    [
+      [bigint, bigint, bigint] & {
+        timestamp: bigint;
+        score: bigint;
+        tier: bigint;
+      }
+    ],
+    "view"
+  >;
+
   setMockAPY: TypedContractMethod<
     [venue: BigNumberish, newAPY: BigNumberish],
     [void],
@@ -548,18 +620,6 @@ export interface YieldRouter extends BaseContract {
     "nonpayable"
   >;
 
-  setUseMorpho: TypedContractMethod<
-    [_useMorpho: boolean],
-    [void],
-    "nonpayable"
-  >;
-
-  setUserRouting: TypedContractMethod<
-    [user: AddressLike, preference: BigNumberish],
-    [void],
-    "nonpayable"
-  >;
-
   silverThreshold: TypedContractMethod<[], [bigint], "view">;
 
   transferOwnership: TypedContractMethod<
@@ -567,6 +627,8 @@ export interface YieldRouter extends BaseContract {
     [void],
     "nonpayable"
   >;
+
+  userUsingMorpho: TypedContractMethod<[arg0: AddressLike], [boolean], "view">;
 
   userVenue: TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
 
@@ -605,6 +667,13 @@ export interface YieldRouter extends BaseContract {
   getFunction(
     nameOrSignature: "getCurrentAPY"
   ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "getReputationHistory"
+  ): TypedContractMethod<
+    [user: AddressLike],
+    [YieldRouter.ReputationSnapshotStructOutput[]],
+    "view"
+  >;
   getFunction(
     nameOrSignature: "getReputationTier"
   ): TypedContractMethod<[user: AddressLike], [bigint], "view">;
@@ -648,6 +717,19 @@ export interface YieldRouter extends BaseContract {
     nameOrSignature: "renounceOwnership"
   ): TypedContractMethod<[], [void], "nonpayable">;
   getFunction(
+    nameOrSignature: "reputationHistory"
+  ): TypedContractMethod<
+    [arg0: AddressLike, arg1: BigNumberish],
+    [
+      [bigint, bigint, bigint] & {
+        timestamp: bigint;
+        score: bigint;
+        tier: bigint;
+      }
+    ],
+    "view"
+  >;
+  getFunction(
     nameOrSignature: "setMockAPY"
   ): TypedContractMethod<
     [venue: BigNumberish, newAPY: BigNumberish],
@@ -673,21 +755,14 @@ export interface YieldRouter extends BaseContract {
     "nonpayable"
   >;
   getFunction(
-    nameOrSignature: "setUseMorpho"
-  ): TypedContractMethod<[_useMorpho: boolean], [void], "nonpayable">;
-  getFunction(
-    nameOrSignature: "setUserRouting"
-  ): TypedContractMethod<
-    [user: AddressLike, preference: BigNumberish],
-    [void],
-    "nonpayable"
-  >;
-  getFunction(
     nameOrSignature: "silverThreshold"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "transferOwnership"
   ): TypedContractMethod<[newOwner: AddressLike], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "userUsingMorpho"
+  ): TypedContractMethod<[arg0: AddressLike], [boolean], "view">;
   getFunction(
     nameOrSignature: "userVenue"
   ): TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
@@ -729,6 +804,20 @@ export interface YieldRouter extends BaseContract {
     RebalancedEvent.InputTuple,
     RebalancedEvent.OutputTuple,
     RebalancedEvent.OutputObject
+  >;
+  getEvent(
+    key: "ReputationSnapshotUpdated"
+  ): TypedContractEvent<
+    ReputationSnapshotUpdatedEvent.InputTuple,
+    ReputationSnapshotUpdatedEvent.OutputTuple,
+    ReputationSnapshotUpdatedEvent.OutputObject
+  >;
+  getEvent(
+    key: "RoutingUpdated"
+  ): TypedContractEvent<
+    RoutingUpdatedEvent.InputTuple,
+    RoutingUpdatedEvent.OutputTuple,
+    RoutingUpdatedEvent.OutputObject
   >;
   getEvent(
     key: "ThresholdsUpdated"
@@ -808,6 +897,28 @@ export interface YieldRouter extends BaseContract {
       RebalancedEvent.OutputObject
     >;
 
+    "ReputationSnapshotUpdated(address,uint256,uint256,uint8)": TypedContractEvent<
+      ReputationSnapshotUpdatedEvent.InputTuple,
+      ReputationSnapshotUpdatedEvent.OutputTuple,
+      ReputationSnapshotUpdatedEvent.OutputObject
+    >;
+    ReputationSnapshotUpdated: TypedContractEvent<
+      ReputationSnapshotUpdatedEvent.InputTuple,
+      ReputationSnapshotUpdatedEvent.OutputTuple,
+      ReputationSnapshotUpdatedEvent.OutputObject
+    >;
+
+    "RoutingUpdated(address,bool)": TypedContractEvent<
+      RoutingUpdatedEvent.InputTuple,
+      RoutingUpdatedEvent.OutputTuple,
+      RoutingUpdatedEvent.OutputObject
+    >;
+    RoutingUpdated: TypedContractEvent<
+      RoutingUpdatedEvent.InputTuple,
+      RoutingUpdatedEvent.OutputTuple,
+      RoutingUpdatedEvent.OutputObject
+    >;
+
     "ThresholdsUpdated(uint256,uint256,uint256)": TypedContractEvent<
       ThresholdsUpdatedEvent.InputTuple,
       ThresholdsUpdatedEvent.OutputTuple,
@@ -817,6 +928,17 @@ export interface YieldRouter extends BaseContract {
       ThresholdsUpdatedEvent.InputTuple,
       ThresholdsUpdatedEvent.OutputTuple,
       ThresholdsUpdatedEvent.OutputObject
+    >;
+
+    "UserRoutingUpdated(address,uint8)": TypedContractEvent<
+      UserRoutingUpdatedEvent.InputTuple,
+      UserRoutingUpdatedEvent.OutputTuple,
+      UserRoutingUpdatedEvent.OutputObject
+    >;
+    UserRoutingUpdated: TypedContractEvent<
+      UserRoutingUpdatedEvent.InputTuple,
+      UserRoutingUpdatedEvent.OutputTuple,
+      UserRoutingUpdatedEvent.OutputObject
     >;
 
     "Withdrawn(address,uint256,uint256,uint8)": TypedContractEvent<
