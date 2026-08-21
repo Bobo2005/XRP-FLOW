@@ -59,7 +59,7 @@ export function useActivityHistory(decimals: number) {
     queryKey: ["activity-history", address, CONTRACTS.yieldRouter.address, chainId],
     enabled,
     staleTime: 5 * 60 * 1000, // 5 minutes - don't refetch if data is fresh
-  cacheTime: 10 * 60 * 1000, // 10 minutes - keep in memory longer
+  gcTime: 1000 * 60 * 5, // 10 minutes - keep in memory longer
   retry: 2,
     queryFn: async () => {
       if (!publicClient || !address) return [];
