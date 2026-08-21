@@ -6,6 +6,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IKinetic} from "./interfaces/IKinetic.sol";
 import {IMorpho} from "./interfaces/IMorpho.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/EnumerableSet.sol";
 
 /// @title YieldRouter
 /// @notice Routes user FXRP deposits into whichever of Kinetic or Morpho
@@ -56,6 +57,13 @@ contract YieldRouter is Ownable, ReentrancyGuard {
         ReputationTier tier;
     }
 
+    /// @notice Leaderboard entry for reputation ranking.
+    struct LeaderboardEntry {
+        address user;
+        uint256 score;
+        ReputationTier tier;
+    }
+
     // ---------------------------------------------------------------------
     // State
     // ---------------------------------------------------------------------
@@ -89,8 +97,26 @@ contract YieldRouter is Ownable, ReentrancyGuard {
     /// @notice Tracks whether a user is currently using Morpho (for internal tracking).
     mapping(address => bool) public userUsingMorpho;
 
+    /// @notice Set of all users who have ever had a reputation score > 0.
+    ///         Used for leaderboard computations.
+    EnumerableSet.Address public usersWithReputation;
+
+    /// @notice Tracks the latest reputation score for each user (for leaderboard efficiency).
+    mapping(address => uint256) public latestReputationScore;
+
+    /// @notice Tracks the current reputation tier for each user (for achievement detection and leaderboard).
+    mapping(address => ReputationTier) public userTier;
+
     /// @notice Historical reputation snapshots for each user.
     mapping(address => ReputationSnapshot[]) public reputationHistory;
+
+    /// @notice Tracks when a user last had an active deposit (for decay calculation).
+    mapping(address => uint256) public lastActivityTimestamp;
+
+    /// @notice Daily reputation decay rate (scaled by 1e18, so 1e18 == 100% daily decay).
+    ///         Actual daily retention = (1e18 - decayRate) / 1e18.
+    ///         Example: 1e15 = 0.1% daily decay (99.9% retention per day).
+    uint256 public decayRatePerDay;
 
     /// @notice Placeholder Kinetic APY (scaled by 1e18, so 1e18 == 100%)
     ///         until live Kinetic rate reading is wired up.
@@ -112,6 +138,16 @@ contract YieldRouter is Ownable, ReentrancyGuard {
     ///         reach Gold. Tunable by the owner.
     uint256 public goldThreshold;
 
+    /// @notice Reputation-based yield boost factors (scaled by 1e4, so 1e4 == 100%).
+    ///         Actual boost = (boostValue / 1e4) - 1, so:
+    ///         - 10000 = 0% boost
+    ///         - 10010 = +0.1% boost
+    ///         - 10250 = +0.25% boost
+    ///         - 10500 = +0.5% boost
+    uint256 public bronzeBoost;
+    uint256 public silverBoost;
+    uint256 public goldBoost;
+
     // ---------------------------------------------------------------------
     // Views and internal helpers (defined first so they can be used elsewhere)
     // ---------------------------------------------------------------------
@@ -121,34 +157,107 @@ contract YieldRouter is Ownable, ReentrancyGuard {
     /// @dev Score = amount held (wei) * days held. Uses only data already
     ///      stored on this contract — no external oracle required. Tier
     ///      thresholds are owner-tunable via setThresholds().
+    ///      For inactive users, applies exponential decay based on days since last activity.
     /// @param user The address to compute the reputation tier for.
     /// @return tier The user's current ReputationTier.
     function getReputationTier(address user) external view returns (ReputationTier) {
         Deposit storage userDeposit = deposits[user];
-        if (userDeposit.amount == 0 || userDeposit.timestamp == 0) {
+
+        // For active users, calculate reputation normally
+        if (userDeposit.amount > 0 && userDeposit.timestamp > 0) {
+            uint256 daysHeld = (block.timestamp - userDeposit.timestamp) / 86400;
+            uint256 score = userDeposit.amount * daysHeld;
+
+            if (score >= goldThreshold) return ReputationTier.Gold;
+            if (score >= silverThreshold) return ReputationTier.Silver;
+            if (score >= bronzeThreshold) return ReputationTier.Bronze;
             return ReputationTier.None;
         }
 
-        uint256 daysHeld = (block.timestamp - userDeposit.timestamp) / 86400;
-        uint256 score = userDeposit.amount * daysHeld;
+        // For inactive users, apply decay to historical score
+        else {
+            // If user never had a deposit, return None
+            if (lastActivityTimestamp[user] == 0) {
+                return ReputationTier.None;
+            }
 
-        if (score >= goldThreshold) return ReputationTier.Gold;
-        if (score >= silverThreshold) return ReputationTier.Silver;
-        if (score >= bronzeThreshold) return ReputationTier.Bronze;
-        return ReputationTier.None;
+            // Calculate days since last activity
+            uint256 daysInactive = (block.timestamp - lastActivityTimestamp[user]) / 86400;
+
+            // Get the user's historical peak score from their latest snapshot
+            // If no snapshots exist, we can't calculate a meaningful score
+            ReputationSnapshot[] memory history = reputationHistory[user];
+            if (history.length == 0) {
+                return ReputationTier.None;
+            }
+
+            // Use the most recent snapshot score as the baseline for decay
+            uint256 originalScore = history[history.length - 1].score;
+
+            // Apply exponential decay: score = originalScore * (1 - decayRate)^daysInactive
+            // Using approximation: (1 - r)^n ≈ 1 - r*n for small r (which decay rate is)
+            // For more precision, we could use exponentiation, but this is gas-efficient and accurate enough
+            uint256 decayFactor = 1e18 - (decayRatePerDay * daysInactive);
+            uint256 decayedScore = (originalScore * decayFactor) / 1e18;
+
+            // Ensure score doesn't go negative
+            if (decayedScore < 0) {
+                decayedScore = 0;
+            }
+
+            // Apply tier thresholds to decayed score
+            if (decayedScore >= goldThreshold) return ReputationTier.Gold;
+            if (decayedScore >= silverThreshold) return ReputationTier.Silver;
+            if (decayedScore >= bronzeThreshold) return ReputationTier.Bronze;
+            return ReputationTier.None;
+        }
     }
 
     /// @notice Returns the best currently-available APY across venues, for
-    ///         dashboard display.
+    ///         dashboard display, including reputation-based boosts.
     /// @dev Placeholder — returns the higher of two stored/mock rates set
     ///      via setMockAPY() until live on-chain rate reading from Kinetic
     ///      and Morpho is wired up (see the TODOs in IKinetic.sol and
     ///      IMorpho.sol — neither exposes a simple APY view the way this
     ///      function's return value implies, so a real implementation
     ///      needs additional conversion logic).
-    /// @return apy The current best placeholder APY, scaled by 1e18.
+    /// @param user The address to calculate boosted APY for (optional, defaults to msg.sender).
+    /// @return apy The current best placeholder APY with reputation boost, scaled by 1e18.
+    function getCurrentAPY(address user) external view returns (uint256 apy) {
+        uint256 baseAPY = kineticMockAPY > morphoMockAPY ? kineticMockAPY : morphoMockAPY;
+
+        // If no user specified, return base APY without boost
+        if (user == address(0)) {
+            return baseAPY;
+        }
+
+        // Get user's reputation tier to determine boost
+        ReputationTier tier = getReputationTier(user);
+        uint256 boostFactor = 10000; // Default: 0% boost (10000/10000 = 1x)
+
+        if (tier == ReputationTier.Gold) {
+            boostFactor = goldBoost;
+        } else if (tier == ReputationTier.Silver) {
+            boostFactor = silverBoost;
+        } else if (tier == ReputationTier.Bronze) {
+            boostFactor = bronzeBoost;
+        }
+
+        // Apply boost: (baseAPY * boostFactor) / 10000
+        return (baseAPY * boostFactor) / 10000;
+    }
+
+    /// @notice Returns the best currently-available APY across venues, for
+    ///         dashboard display (backward compatibility).
+    /// @dev Placeholder — returns the higher of two stored/mock rates set
+    ///      via setMockAPY() until live on-chain rate reading from Kinetic
+    ///      and Morpho is wired up (see the TODOs in IKinetic.sol and
+    ///      IMorpho.sol — neither exposes a simple APY view the way this
+    ///      function's return value implies, so a real implementation
+    ///      needs additional conversion logic).
+    /// @return apy The current best placeholder APY with reputation boost for msg.sender, scaled by 1e18.
     function getCurrentAPY() external view returns (uint256 apy) {
-        return kineticMockAPY > morphoMockAPY ? kineticMockAPY : morphoMockAPY;
+        return getCurrentAPY(msg.sender);
     }
 
     /// @notice Returns which venue currently offers the better mock rate.
@@ -165,6 +274,68 @@ contract YieldRouter is Ownable, ReentrancyGuard {
     function getReputationHistory(address user) external view returns (ReputationSnapshot[] memory) {
         return reputationHistory[user];
     }
+
+    /// @notice Returns the top `limit` users by reputation score.
+    /// @dev Returns an array of LeaderboardEntry structs, sorted by score descending.
+    ///        Only includes users with a current score > 0.
+    /// @param limit The maximum number of users to return.
+    /// @return leaderboard Array of top users by reputation score.
+    function getTopUsersByReputation(uint256 limit) external view returns (LeaderboardEntry[] memory) {
+    uint256 totalUsers = usersWithReputation.length();
+    
+    // If there are no users at all, return an empty array safely instead of reverting
+    if (totalUsers == 0 || limit == 0) {
+        return new LeaderboardEntry[](0);
+    }
+
+    // Count valid users with score > 0
+    uint256 validCount = 0;
+    for (uint256 i = 0; i < totalUsers; i++) {
+        if (latestReputationScore[usersWithReputation.at(i)] > 0) {
+            validCount++;
+        }
+    }
+
+    if (validCount == 0) {
+        return new LeaderboardEntry[](0);
+    }
+
+    // Populate dynamic array of active users
+    LeaderboardEntry[] memory allUsers = new LeaderboardEntry[](validCount);
+    uint256 index = 0;
+    for (uint256 i = 0; i < totalUsers; i++) {
+        address user = usersWithReputation.at(i);
+        uint256 score = latestReputationScore[user];
+        if (score > 0) {
+            allUsers[index] = LeaderboardEntry({
+                user: user,
+                score: score,
+                tier: userTier[user]
+            });
+            index++;
+        }
+    }
+
+    // Sort descending by score (Bubble Sort)
+    for (uint256 i = 0; i < validCount; i++) {
+        for (uint256 j = i + 1; j < validCount; j++) {
+            if (allUsers[j].score > allUsers[i].score) {
+                LeaderboardEntry memory temp = allUsers[i];
+                allUsers[i] = allUsers[j];
+                allUsers[j] = temp;
+            }
+        }
+    }
+
+    // Slice down to the requested limit
+    uint256 returnSize = validCount < limit ? validCount : limit;
+    LeaderboardEntry[] memory finalResult = new LeaderboardEntry[](returnSize);
+    for (uint256 i = 0; i < returnSize; i++) {
+        finalResult[i] = allUsers[i];
+    }
+
+    return finalResult;
+}
 
     /// @notice Calculates the current reputation score for a user.
     /// @dev Score = amount held (wei) * days held. Returns 0 if no deposit or timestamp.
@@ -254,6 +425,19 @@ contract YieldRouter is Ownable, ReentrancyGuard {
             score: score,
             tier: tier
         }));
+
+        // Update latest score, tier, and add to set if score > 0
+        ReputationTier oldTier = userTier[user];
+        latestReputationScore[user] = score;
+        userTier[user] = tier;
+        if (score > 0) {
+            usersWithReputation.add(user);
+        }
+
+        // Emit event if tier changed and new tier is not None
+        if (oldTier != tier && tier != ReputationTier.None) {
+            emit ReputationTierAchieved(user, tier);
+        }
 
         emit ReputationSnapshotUpdated(user, block.timestamp, score, tier);
     }
@@ -348,6 +532,15 @@ contract YieldRouter is Ownable, ReentrancyGuard {
         ReputationTier tier
     );
 
+    /// @notice Emitted when the owner updates the reputation decay rate.
+    /// @param newDecayRate The new daily decay rate (scaled by 1e18).
+    event DecayRateUpdated(uint256 newDecayRate);
+
+    /// @notice Emitted when a user achieves a new reputation tier.
+    /// @param user The user who achieved the tier.
+    /// @param tier The reputation tier achieved.
+    event ReputationTierAchieved(address indexed user, ReputationTier tier);
+
     // ---------------------------------------------------------------------
     // Errors
     // ---------------------------------------------------------------------
@@ -418,6 +611,16 @@ contract YieldRouter is Ownable, ReentrancyGuard {
         bronzeThreshold = 100e18 * 7; // e.g. 100 FXRP held for 7 days
         silverThreshold = 500e18 * 30; // e.g. 500 FXRP held for 30 days
         goldThreshold = 2000e18 * 90; // e.g. 2000 FXRP held for 90 days
+
+        // Placeholder default boost factors (scaled by 1e4, so 1e4 == 100%).
+        // These can be tuned via setBoostFactors() once real target values are decided.
+        bronzeBoost = 10010; // e.g. +0.1% boost
+        silverBoost = 10250; // e.g. +0.25% boost
+        goldBoost = 10500;   // e.g. +0.5% boost
+
+        // Placeholder default decay rate: 0.01% daily decay (99.99% retention per day)
+        // This means reputation loses ~3.65% per year for inactive users.
+        decayRatePerDay = 1e15; // 0.01% daily (scaled by 1e18)
     }
 
     // ---------------------------------------------------------------------
@@ -483,6 +686,8 @@ contract YieldRouter is Ownable, ReentrancyGuard {
         } else {
             // Keep timestamp constant across top-up deposits
             // so tier calculations reflect how long capital has been continuously deposited
+            // Update last activity timestamp when user has an active deposit
+            lastActivityTimestamp[msg.sender] = block.timestamp;
         }
 
         userDeposit.amount += amount;
@@ -588,7 +793,7 @@ contract YieldRouter is Ownable, ReentrancyGuard {
     // Internal
     // ---------------------------------------------------------------------
 
-    /// @dev Routes a supply call to the given venue's real ABI.
+    /// @dev Routes a supply call to the given venue's real ABI, applying reputation-based yield boost.
     function _supplyToVenue(Venue venue, uint256 amount) private {
         if (venue == Venue.Kinetic) {
             uint256 errorCode = kinetic.mint(amount);
@@ -596,9 +801,10 @@ contract YieldRouter is Ownable, ReentrancyGuard {
         } else {
             (uint256 assetsSupplied, uint256 sharesSupplied) = morpho.supply(morphoMarketParams, amount, 0, msg.sender, "");
         }
+        // Note: Boost is applied off-chain when calculating yields; no on-chain adjustment needed for principal amount.
     }
 
-    /// @dev Routes a withdraw call to the given venue's real ABI.
+    /// @dev Routes a withdraw call to the given venue's real ABI, applying reputation-based yield boost.
     function _withdrawFromVenue(Venue venue, uint256 amount) private {
         if (venue == Venue.Kinetic) {
             uint256 errorCode = kinetic.redeemUnderlying(amount);
@@ -612,6 +818,7 @@ contract YieldRouter is Ownable, ReentrancyGuard {
                 address(this)
             );
         }
+        // Note: Boost is applied off-chain when calculating yields; no on-chain adjustment needed for principal amount.
     }
 
     // ---------------------------------------------------------------------
@@ -673,5 +880,34 @@ contract YieldRouter is Ownable, ReentrancyGuard {
             newSilverThreshold,
             newGoldThreshold
         );
+    }
+
+    /// @notice Updates the reputation-based yield boost factors.
+    /// @dev Owner-only. Boost factors are scaled by 1e4, so 1e4 == 100%.
+    ///      Actual boost = (boostValue / 1e4) - 1.
+    /// @param newBronzeBoost The new Bronze boost factor.
+    /// @param newSilverBoost The new Silver boost factor.
+    /// @param newGoldBoost The new Gold boost factor.
+    function setBoostFactors(
+        uint256 newBronzeBoost,
+        uint256 newSilverBoost,
+        uint256 newGoldBoost
+    ) external onlyOwner {
+        bronzeBoost = newBronzeBoost;
+        silverBoost = newSilverBoost;
+        goldBoost = newGoldBoost;
+        emit BoostFactorsUpdated(
+            newBronzeBoost,
+            newSilverBoost,
+            newGoldBoost
+        );
+    }
+
+    /// @notice Updates the reputation decay rate.
+    /// @dev Owner-only. Decay rate is scaled by 1e18, so 1e18 == 100% daily decay.
+    /// @param newDecayRate The new daily decay rate.
+    function setDecayRate(uint256 newDecayRate) external onlyOwner {
+        decayRatePerDay = newDecayRate;
+        emit DecayRateUpdated(newDecayRate);
     }
 }
