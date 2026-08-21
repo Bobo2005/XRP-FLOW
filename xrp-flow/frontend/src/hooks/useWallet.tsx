@@ -1,4 +1,5 @@
 
+
 // import { useCallback } from "react";
 // import { useWalletClient, useAccount, useConnect, useDisconnect } from "wagmi";
 // import { coston2 } from "../wagmi";
@@ -70,7 +71,7 @@
 //   }, [networkSwitcher]);
 
 //   return {
-//     account: address || null,
+//     account: address ?? null,
 //     isConnected,
 //     isConnecting,
 //     walletName,
@@ -168,7 +169,7 @@ export function useWallet(): EnhancedWalletHook {
     walletClient,
     network: chain,
     isOnCorrectNetwork,
-    balance: balanceCache.formattedBalance,
+    balance: balanceCache.formattedBalance ?? null,
     balanceIsLoading: balanceCache.isLoading,
     balanceError: balanceCache.error,
     connect: handleConnect,

@@ -1,4 +1,6 @@
-// import React, { useEffect } from "react";
+
+
+// import { useEffect } from "react";
 // import { useQRScanner } from "../lib/wallet/qrScanner";
 // import { X, Camera, AlertCircle } from "lucide-react";
 
@@ -9,7 +11,7 @@
 // }
 
 // export default function QRScannerModal({ isOpen, onClose, onScan }: QRScannerModalProps) {
-//   const { videoRef, start, stop, isScanning, error, hasPermission } = useQRScanner({
+//   const { videoRef, start, stop, isScanning, error } = useQRScanner({
 //     onScan: (data) => {
 //       onScan(data);
 //       onClose();
@@ -124,7 +126,7 @@ export default function QRScannerModal({ isOpen, onClose, onScan }: QRScannerMod
 
         <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-black border border-border flex items-center justify-center">
           <video
-            ref={videoRef}
+            ref={videoRef as React.RefObject<HTMLVideoElement>}
             playsInline
             muted
             className="absolute inset-0 h-full w-full object-cover"
