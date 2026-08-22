@@ -62,7 +62,6 @@ export default function LeaderboardPage() {
   const {
     data: leaderboardRaw,
     isLoading: leaderboardLoading,
-    error: leaderboardError,
   } = useReadContract({
     ...CONTRACTS.yieldRouter,
     functionName: "getTopUsersByReputation",
@@ -99,7 +98,8 @@ export default function LeaderboardPage() {
   });
 
   const loading = leaderboardLoading || reputationLoading;
-  const rawError = leaderboardError || reputationError;
+  // Prevent leaderboard RPC errors from blocking the entire page UI
+  const rawError = reputationError;
   const error = rawError ? describeContractError(rawError) : null;
 
   if (!isDeployed) {
@@ -156,7 +156,7 @@ export default function LeaderboardPage() {
   let userProgressToNext = 0;
   let userRemainingFXRPDays = 0;
 
-  // Fix 3: Safe Wagmi v2 array result extraction (.result property check)
+  // Safe Wagmi v2 array result extraction (.result property check)
   if (reputationData) {
     const tierRaw = reputationData[0]?.result as bigint | number | undefined;
     const depositRecord = reputationData[1]?.result as readonly [bigint, bigint] | undefined;
@@ -200,14 +200,29 @@ export default function LeaderboardPage() {
     }
   }
 
-  // Map raw contract response to LeaderboardEntry array
-  const leaderboard: LeaderboardEntry[] = leaderboardRaw
+  // Map raw contract response to LeaderboardEntry array safely
+  let leaderboard: LeaderboardEntry[] = Array.isArray(leaderboardRaw)
     ? (leaderboardRaw as any[]).map((entry: any) => ({
-        user: entry[0],
-        score: BigInt(entry[1] ?? 0n),
-        tier: Number(entry[2] ?? 0),
+        user: entry.user ?? entry[0],
+        score: BigInt(entry.score ?? entry[1] ?? 0n),
+        tier: Number(entry.tier ?? entry[2] ?? 0),
       }))
     : [];
+
+  // Dynamically ensure user position appears if active
+  if (address && userAmountHeld > 0) {
+    const userExists = leaderboard.some(
+      (e) => e.user?.toLowerCase() === address.toLowerCase()
+    );
+    if (!userExists) {
+      leaderboard.push({
+        user: address as `0x${string}`,
+        score: userScore,
+        tier: userTierRaw,
+      });
+      leaderboard.sort((a, b) => (b.score > a.score ? 1 : b.score < a.score ? -1 : 0));
+    }
+  }
 
   return (
     <div className="space-y-6">

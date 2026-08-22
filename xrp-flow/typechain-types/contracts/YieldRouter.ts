@@ -35,6 +35,18 @@ export declare namespace YieldRouter {
     score: bigint,
     tier: bigint
   ] & { timestamp: bigint; score: bigint; tier: bigint };
+
+  export type LeaderboardEntryStruct = {
+    user: AddressLike;
+    score: BigNumberish;
+    tier: BigNumberish;
+  };
+
+  export type LeaderboardEntryStructOutput = [
+    user: string,
+    score: bigint,
+    tier: bigint
+  ] & { user: string; score: bigint; tier: bigint };
 }
 
 export declare namespace IMorpho {
@@ -64,18 +76,25 @@ export declare namespace IMorpho {
 export interface YieldRouterInterface extends Interface {
   getFunction(
     nameOrSignature:
+      | "bronzeBoost"
       | "bronzeThreshold"
+      | "decayRatePerDay"
       | "deposit"
       | "depositToVenue"
       | "deposits"
       | "fxrp"
       | "getBestVenue"
-      | "getCurrentAPY"
+      | "getCurrentAPY()"
+      | "getCurrentAPY(address)"
       | "getReputationHistory"
       | "getReputationTier"
+      | "getTopUsersByReputation"
+      | "goldBoost"
       | "goldThreshold"
       | "kinetic"
       | "kineticMockAPY"
+      | "lastActivityTimestamp"
+      | "latestReputationScore"
       | "morpho"
       | "morphoMarketParams"
       | "morphoMockAPY"
@@ -83,11 +102,15 @@ export interface YieldRouterInterface extends Interface {
       | "rebalance"
       | "renounceOwnership"
       | "reputationHistory"
+      | "setBoostFactors"
+      | "setDecayRate"
       | "setMockAPY"
       | "setMorphoMarketParams"
       | "setThresholds"
+      | "silverBoost"
       | "silverThreshold"
       | "transferOwnership"
+      | "userTier"
       | "userUsingMorpho"
       | "userVenue"
       | "withdraw"
@@ -95,12 +118,15 @@ export interface YieldRouterInterface extends Interface {
 
   getEvent(
     nameOrSignatureOrTopic:
+      | "BoostFactorsUpdated"
+      | "DecayRateUpdated"
       | "Deposited"
       | "MockAPYUpdated"
       | "MorphoMarketParamsUpdated"
       | "OwnershipTransferred"
       | "Rebalanced"
       | "ReputationSnapshotUpdated"
+      | "ReputationTierAchieved"
       | "RoutingUpdated"
       | "ThresholdsUpdated"
       | "UserRoutingUpdated"
@@ -108,7 +134,15 @@ export interface YieldRouterInterface extends Interface {
   ): EventFragment;
 
   encodeFunctionData(
+    functionFragment: "bronzeBoost",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
     functionFragment: "bronzeThreshold",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "decayRatePerDay",
     values?: undefined
   ): string;
   encodeFunctionData(
@@ -129,8 +163,12 @@ export interface YieldRouterInterface extends Interface {
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "getCurrentAPY",
+    functionFragment: "getCurrentAPY()",
     values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "getCurrentAPY(address)",
+    values: [AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "getReputationHistory",
@@ -141,6 +179,11 @@ export interface YieldRouterInterface extends Interface {
     values: [AddressLike]
   ): string;
   encodeFunctionData(
+    functionFragment: "getTopUsersByReputation",
+    values: [BigNumberish]
+  ): string;
+  encodeFunctionData(functionFragment: "goldBoost", values?: undefined): string;
+  encodeFunctionData(
     functionFragment: "goldThreshold",
     values?: undefined
   ): string;
@@ -148,6 +191,14 @@ export interface YieldRouterInterface extends Interface {
   encodeFunctionData(
     functionFragment: "kineticMockAPY",
     values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "lastActivityTimestamp",
+    values: [AddressLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "latestReputationScore",
+    values: [AddressLike]
   ): string;
   encodeFunctionData(functionFragment: "morpho", values?: undefined): string;
   encodeFunctionData(
@@ -169,6 +220,14 @@ export interface YieldRouterInterface extends Interface {
     values: [AddressLike, BigNumberish]
   ): string;
   encodeFunctionData(
+    functionFragment: "setBoostFactors",
+    values: [BigNumberish, BigNumberish, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "setDecayRate",
+    values: [BigNumberish]
+  ): string;
+  encodeFunctionData(
     functionFragment: "setMockAPY",
     values: [BigNumberish, BigNumberish]
   ): string;
@@ -181,11 +240,19 @@ export interface YieldRouterInterface extends Interface {
     values: [BigNumberish, BigNumberish, BigNumberish]
   ): string;
   encodeFunctionData(
+    functionFragment: "silverBoost",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
     functionFragment: "silverThreshold",
     values?: undefined
   ): string;
   encodeFunctionData(
     functionFragment: "transferOwnership",
+    values: [AddressLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "userTier",
     values: [AddressLike]
   ): string;
   encodeFunctionData(
@@ -202,7 +269,15 @@ export interface YieldRouterInterface extends Interface {
   ): string;
 
   decodeFunctionResult(
+    functionFragment: "bronzeBoost",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "bronzeThreshold",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "decayRatePerDay",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "deposit", data: BytesLike): Result;
@@ -217,7 +292,11 @@ export interface YieldRouterInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "getCurrentAPY",
+    functionFragment: "getCurrentAPY()",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "getCurrentAPY(address)",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -229,12 +308,25 @@ export interface YieldRouterInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "getTopUsersByReputation",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(functionFragment: "goldBoost", data: BytesLike): Result;
+  decodeFunctionResult(
     functionFragment: "goldThreshold",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "kinetic", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "kineticMockAPY",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "lastActivityTimestamp",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "latestReputationScore",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "morpho", data: BytesLike): Result;
@@ -256,6 +348,14 @@ export interface YieldRouterInterface extends Interface {
     functionFragment: "reputationHistory",
     data: BytesLike
   ): Result;
+  decodeFunctionResult(
+    functionFragment: "setBoostFactors",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "setDecayRate",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(functionFragment: "setMockAPY", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "setMorphoMarketParams",
@@ -266,6 +366,10 @@ export interface YieldRouterInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "silverBoost",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "silverThreshold",
     data: BytesLike
   ): Result;
@@ -273,12 +377,47 @@ export interface YieldRouterInterface extends Interface {
     functionFragment: "transferOwnership",
     data: BytesLike
   ): Result;
+  decodeFunctionResult(functionFragment: "userTier", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "userUsingMorpho",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "userVenue", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "withdraw", data: BytesLike): Result;
+}
+
+export namespace BoostFactorsUpdatedEvent {
+  export type InputTuple = [
+    newBronzeBoost: BigNumberish,
+    newSilverBoost: BigNumberish,
+    newGoldBoost: BigNumberish
+  ];
+  export type OutputTuple = [
+    newBronzeBoost: bigint,
+    newSilverBoost: bigint,
+    newGoldBoost: bigint
+  ];
+  export interface OutputObject {
+    newBronzeBoost: bigint;
+    newSilverBoost: bigint;
+    newGoldBoost: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace DecayRateUpdatedEvent {
+  export type InputTuple = [newDecayRate: BigNumberish];
+  export type OutputTuple = [newDecayRate: bigint];
+  export interface OutputObject {
+    newDecayRate: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
 }
 
 export namespace DepositedEvent {
@@ -410,6 +549,19 @@ export namespace ReputationSnapshotUpdatedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
+export namespace ReputationTierAchievedEvent {
+  export type InputTuple = [user: AddressLike, tier: BigNumberish];
+  export type OutputTuple = [user: string, tier: bigint];
+  export interface OutputObject {
+    user: string;
+    tier: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
 export namespace RoutingUpdatedEvent {
   export type InputTuple = [morpho: AddressLike, useMorpho: boolean];
   export type OutputTuple = [morpho: string, useMorpho: boolean];
@@ -526,7 +678,11 @@ export interface YieldRouter extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
+  bronzeBoost: TypedContractMethod<[], [bigint], "view">;
+
   bronzeThreshold: TypedContractMethod<[], [bigint], "view">;
+
+  decayRatePerDay: TypedContractMethod<[], [bigint], "view">;
 
   deposit: TypedContractMethod<[amount: BigNumberish], [void], "nonpayable">;
 
@@ -546,7 +702,13 @@ export interface YieldRouter extends BaseContract {
 
   getBestVenue: TypedContractMethod<[], [bigint], "view">;
 
-  getCurrentAPY: TypedContractMethod<[], [bigint], "view">;
+  "getCurrentAPY()": TypedContractMethod<[], [bigint], "view">;
+
+  "getCurrentAPY(address)": TypedContractMethod<
+    [user: AddressLike],
+    [bigint],
+    "view"
+  >;
 
   getReputationHistory: TypedContractMethod<
     [user: AddressLike],
@@ -556,11 +718,31 @@ export interface YieldRouter extends BaseContract {
 
   getReputationTier: TypedContractMethod<[user: AddressLike], [bigint], "view">;
 
+  getTopUsersByReputation: TypedContractMethod<
+    [limit: BigNumberish],
+    [YieldRouter.LeaderboardEntryStructOutput[]],
+    "view"
+  >;
+
+  goldBoost: TypedContractMethod<[], [bigint], "view">;
+
   goldThreshold: TypedContractMethod<[], [bigint], "view">;
 
   kinetic: TypedContractMethod<[], [string], "view">;
 
   kineticMockAPY: TypedContractMethod<[], [bigint], "view">;
+
+  lastActivityTimestamp: TypedContractMethod<
+    [arg0: AddressLike],
+    [bigint],
+    "view"
+  >;
+
+  latestReputationScore: TypedContractMethod<
+    [arg0: AddressLike],
+    [bigint],
+    "view"
+  >;
 
   morpho: TypedContractMethod<[], [string], "view">;
 
@@ -598,6 +780,22 @@ export interface YieldRouter extends BaseContract {
     "view"
   >;
 
+  setBoostFactors: TypedContractMethod<
+    [
+      newBronzeBoost: BigNumberish,
+      newSilverBoost: BigNumberish,
+      newGoldBoost: BigNumberish
+    ],
+    [void],
+    "nonpayable"
+  >;
+
+  setDecayRate: TypedContractMethod<
+    [newDecayRate: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
+
   setMockAPY: TypedContractMethod<
     [venue: BigNumberish, newAPY: BigNumberish],
     [void],
@@ -620,6 +818,8 @@ export interface YieldRouter extends BaseContract {
     "nonpayable"
   >;
 
+  silverBoost: TypedContractMethod<[], [bigint], "view">;
+
   silverThreshold: TypedContractMethod<[], [bigint], "view">;
 
   transferOwnership: TypedContractMethod<
@@ -627,6 +827,8 @@ export interface YieldRouter extends BaseContract {
     [void],
     "nonpayable"
   >;
+
+  userTier: TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
 
   userUsingMorpho: TypedContractMethod<[arg0: AddressLike], [boolean], "view">;
 
@@ -639,7 +841,13 @@ export interface YieldRouter extends BaseContract {
   ): T;
 
   getFunction(
+    nameOrSignature: "bronzeBoost"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
     nameOrSignature: "bronzeThreshold"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "decayRatePerDay"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "deposit"
@@ -665,8 +873,11 @@ export interface YieldRouter extends BaseContract {
     nameOrSignature: "getBestVenue"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
-    nameOrSignature: "getCurrentAPY"
+    nameOrSignature: "getCurrentAPY()"
   ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "getCurrentAPY(address)"
+  ): TypedContractMethod<[user: AddressLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "getReputationHistory"
   ): TypedContractMethod<
@@ -678,6 +889,16 @@ export interface YieldRouter extends BaseContract {
     nameOrSignature: "getReputationTier"
   ): TypedContractMethod<[user: AddressLike], [bigint], "view">;
   getFunction(
+    nameOrSignature: "getTopUsersByReputation"
+  ): TypedContractMethod<
+    [limit: BigNumberish],
+    [YieldRouter.LeaderboardEntryStructOutput[]],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "goldBoost"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
     nameOrSignature: "goldThreshold"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
@@ -686,6 +907,12 @@ export interface YieldRouter extends BaseContract {
   getFunction(
     nameOrSignature: "kineticMockAPY"
   ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "lastActivityTimestamp"
+  ): TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "latestReputationScore"
+  ): TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "morpho"
   ): TypedContractMethod<[], [string], "view">;
@@ -730,6 +957,20 @@ export interface YieldRouter extends BaseContract {
     "view"
   >;
   getFunction(
+    nameOrSignature: "setBoostFactors"
+  ): TypedContractMethod<
+    [
+      newBronzeBoost: BigNumberish,
+      newSilverBoost: BigNumberish,
+      newGoldBoost: BigNumberish
+    ],
+    [void],
+    "nonpayable"
+  >;
+  getFunction(
+    nameOrSignature: "setDecayRate"
+  ): TypedContractMethod<[newDecayRate: BigNumberish], [void], "nonpayable">;
+  getFunction(
     nameOrSignature: "setMockAPY"
   ): TypedContractMethod<
     [venue: BigNumberish, newAPY: BigNumberish],
@@ -755,11 +996,17 @@ export interface YieldRouter extends BaseContract {
     "nonpayable"
   >;
   getFunction(
+    nameOrSignature: "silverBoost"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
     nameOrSignature: "silverThreshold"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "transferOwnership"
   ): TypedContractMethod<[newOwner: AddressLike], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "userTier"
+  ): TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "userUsingMorpho"
   ): TypedContractMethod<[arg0: AddressLike], [boolean], "view">;
@@ -770,6 +1017,20 @@ export interface YieldRouter extends BaseContract {
     nameOrSignature: "withdraw"
   ): TypedContractMethod<[amount: BigNumberish], [void], "nonpayable">;
 
+  getEvent(
+    key: "BoostFactorsUpdated"
+  ): TypedContractEvent<
+    BoostFactorsUpdatedEvent.InputTuple,
+    BoostFactorsUpdatedEvent.OutputTuple,
+    BoostFactorsUpdatedEvent.OutputObject
+  >;
+  getEvent(
+    key: "DecayRateUpdated"
+  ): TypedContractEvent<
+    DecayRateUpdatedEvent.InputTuple,
+    DecayRateUpdatedEvent.OutputTuple,
+    DecayRateUpdatedEvent.OutputObject
+  >;
   getEvent(
     key: "Deposited"
   ): TypedContractEvent<
@@ -813,6 +1074,13 @@ export interface YieldRouter extends BaseContract {
     ReputationSnapshotUpdatedEvent.OutputObject
   >;
   getEvent(
+    key: "ReputationTierAchieved"
+  ): TypedContractEvent<
+    ReputationTierAchievedEvent.InputTuple,
+    ReputationTierAchievedEvent.OutputTuple,
+    ReputationTierAchievedEvent.OutputObject
+  >;
+  getEvent(
     key: "RoutingUpdated"
   ): TypedContractEvent<
     RoutingUpdatedEvent.InputTuple,
@@ -842,6 +1110,28 @@ export interface YieldRouter extends BaseContract {
   >;
 
   filters: {
+    "BoostFactorsUpdated(uint256,uint256,uint256)": TypedContractEvent<
+      BoostFactorsUpdatedEvent.InputTuple,
+      BoostFactorsUpdatedEvent.OutputTuple,
+      BoostFactorsUpdatedEvent.OutputObject
+    >;
+    BoostFactorsUpdated: TypedContractEvent<
+      BoostFactorsUpdatedEvent.InputTuple,
+      BoostFactorsUpdatedEvent.OutputTuple,
+      BoostFactorsUpdatedEvent.OutputObject
+    >;
+
+    "DecayRateUpdated(uint256)": TypedContractEvent<
+      DecayRateUpdatedEvent.InputTuple,
+      DecayRateUpdatedEvent.OutputTuple,
+      DecayRateUpdatedEvent.OutputObject
+    >;
+    DecayRateUpdated: TypedContractEvent<
+      DecayRateUpdatedEvent.InputTuple,
+      DecayRateUpdatedEvent.OutputTuple,
+      DecayRateUpdatedEvent.OutputObject
+    >;
+
     "Deposited(address,uint256,uint256,uint8)": TypedContractEvent<
       DepositedEvent.InputTuple,
       DepositedEvent.OutputTuple,
@@ -906,6 +1196,17 @@ export interface YieldRouter extends BaseContract {
       ReputationSnapshotUpdatedEvent.InputTuple,
       ReputationSnapshotUpdatedEvent.OutputTuple,
       ReputationSnapshotUpdatedEvent.OutputObject
+    >;
+
+    "ReputationTierAchieved(address,uint8)": TypedContractEvent<
+      ReputationTierAchievedEvent.InputTuple,
+      ReputationTierAchievedEvent.OutputTuple,
+      ReputationTierAchievedEvent.OutputObject
+    >;
+    ReputationTierAchieved: TypedContractEvent<
+      ReputationTierAchievedEvent.InputTuple,
+      ReputationTierAchievedEvent.OutputTuple,
+      ReputationTierAchievedEvent.OutputObject
     >;
 
     "RoutingUpdated(address,bool)": TypedContractEvent<

@@ -149,14 +149,14 @@ async function main() {
 
   // 2. Deploy MockKinetic
   const MockKinetic = await ethers.getContractFactory("MockKinetic");
-  const kinetic = await MockKinetic.deploy();
+  const kinetic = await MockKinetic.deploy(fxrpAddress);
   await kinetic.waitForDeployment();
   const kineticAddress = await kinetic.getAddress();
   console.log(`MockKinetic deployed to: ${kineticAddress}`);
 
   // 3. Deploy MockMorpho
   const MockMorpho = await ethers.getContractFactory("MockMorpho");
-  const morpho = await MockMorpho.deploy();
+  const morpho = await MockMorpho.deploy(fxrpAddress);
   await morpho.waitForDeployment();
   const morphoAddress = await morpho.getAddress();
   console.log(`MockMorpho deployed to: ${morphoAddress}`);

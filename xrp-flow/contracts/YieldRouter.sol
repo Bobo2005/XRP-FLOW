@@ -6,7 +6,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IKinetic} from "./interfaces/IKinetic.sol";
 import {IMorpho} from "./interfaces/IMorpho.sol";
-import {EnumerableSet} from "@openzeppelin/contracts/utils/EnumerableSet.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 /// @title YieldRouter
 /// @notice Routes user FXRP deposits into whichever of Kinetic or Morpho
@@ -18,6 +18,7 @@ import {EnumerableSet} from "@openzeppelin/contracts/utils/EnumerableSet.sol";
 ///      rebalancing between venues for an existing position is out of
 ///      scope for this contract and is a roadmap item (see README.md).
 contract YieldRouter is Ownable, ReentrancyGuard {
+    using EnumerableSet for EnumerableSet.AddressSet;
     // ---------------------------------------------------------------------
     // Types
     // ---------------------------------------------------------------------
@@ -97,9 +98,9 @@ contract YieldRouter is Ownable, ReentrancyGuard {
     /// @notice Tracks whether a user is currently using Morpho (for internal tracking).
     mapping(address => bool) public userUsingMorpho;
 
-    /// @notice Set of all users who have ever had a reputation score > 0.
+    /// @notice Set of all active users with deposits or reputation scores.
     ///         Used for leaderboard computations.
-    EnumerableSet.Address public usersWithReputation;
+    EnumerableSet.AddressSet private usersWithReputation;
 
     /// @notice Tracks the latest reputation score for each user (for leaderboard efficiency).
     mapping(address => uint256) public latestReputationScore;
@@ -160,7 +161,7 @@ contract YieldRouter is Ownable, ReentrancyGuard {
     ///      For inactive users, applies exponential decay based on days since last activity.
     /// @param user The address to compute the reputation tier for.
     /// @return tier The user's current ReputationTier.
-    function getReputationTier(address user) external view returns (ReputationTier) {
+    function getReputationTier(address user) public view returns (ReputationTier) {
         Deposit storage userDeposit = deposits[user];
 
         // For active users, calculate reputation normally
@@ -223,7 +224,7 @@ contract YieldRouter is Ownable, ReentrancyGuard {
     ///      needs additional conversion logic).
     /// @param user The address to calculate boosted APY for (optional, defaults to msg.sender).
     /// @return apy The current best placeholder APY with reputation boost, scaled by 1e18.
-    function getCurrentAPY(address user) external view returns (uint256 apy) {
+    function getCurrentAPY(address user) public view returns (uint256 apy) {
         uint256 baseAPY = kineticMockAPY > morphoMockAPY ? kineticMockAPY : morphoMockAPY;
 
         // If no user specified, return base APY without boost
@@ -281,61 +282,63 @@ contract YieldRouter is Ownable, ReentrancyGuard {
     /// @param limit The maximum number of users to return.
     /// @return leaderboard Array of top users by reputation score.
     function getTopUsersByReputation(uint256 limit) external view returns (LeaderboardEntry[] memory) {
-    uint256 totalUsers = usersWithReputation.length();
-    
-    // If there are no users at all, return an empty array safely instead of reverting
-    if (totalUsers == 0 || limit == 0) {
-        return new LeaderboardEntry[](0);
-    }
-
-    // Count valid users with score > 0
-    uint256 validCount = 0;
-    for (uint256 i = 0; i < totalUsers; i++) {
-        if (latestReputationScore[usersWithReputation.at(i)] > 0) {
-            validCount++;
+        uint256 totalUsers = usersWithReputation.length();
+        
+        // If there are no users at all, return an empty array safely instead of reverting
+        if (totalUsers == 0 || limit == 0) {
+            return new LeaderboardEntry[](0);
         }
-    }
 
-    if (validCount == 0) {
-        return new LeaderboardEntry[](0);
-    }
-
-    // Populate dynamic array of active users
-    LeaderboardEntry[] memory allUsers = new LeaderboardEntry[](validCount);
-    uint256 index = 0;
-    for (uint256 i = 0; i < totalUsers; i++) {
-        address user = usersWithReputation.at(i);
-        uint256 score = latestReputationScore[user];
-        if (score > 0) {
-            allUsers[index] = LeaderboardEntry({
-                user: user,
-                score: score,
-                tier: userTier[user]
-            });
-            index++;
-        }
-    }
-
-    // Sort descending by score (Bubble Sort)
-    for (uint256 i = 0; i < validCount; i++) {
-        for (uint256 j = i + 1; j < validCount; j++) {
-            if (allUsers[j].score > allUsers[i].score) {
-                LeaderboardEntry memory temp = allUsers[i];
-                allUsers[i] = allUsers[j];
-                allUsers[j] = temp;
+        // Count active users
+        uint256 validCount = 0;
+        for (uint256 i = 0; i < totalUsers; i++) {
+            address user = usersWithReputation.at(i);
+            if (deposits[user].amount > 0 || latestReputationScore[user] > 0) {
+                validCount++;
             }
         }
-    }
 
-    // Slice down to the requested limit
-    uint256 returnSize = validCount < limit ? validCount : limit;
-    LeaderboardEntry[] memory finalResult = new LeaderboardEntry[](returnSize);
-    for (uint256 i = 0; i < returnSize; i++) {
-        finalResult[i] = allUsers[i];
-    }
+        if (validCount == 0) {
+            return new LeaderboardEntry[](0);
+        }
 
-    return finalResult;
-}
+        // Populate dynamic array of active users
+        LeaderboardEntry[] memory allUsers = new LeaderboardEntry[](validCount);
+        uint256 index = 0;
+        for (uint256 i = 0; i < totalUsers; i++) {
+            address user = usersWithReputation.at(i);
+            uint256 currentScore = _calculateReputationScore(user);
+            uint256 displayScore = currentScore > latestReputationScore[user] ? currentScore : latestReputationScore[user];
+            if (deposits[user].amount > 0 || displayScore > 0) {
+                allUsers[index] = LeaderboardEntry({
+                    user: user,
+                    score: displayScore,
+                    tier: userTier[user]
+                });
+                index++;
+            }
+        }
+
+        // Sort descending by score (Bubble Sort)
+        for (uint256 i = 0; i < index; i++) {
+            for (uint256 j = i + 1; j < index; j++) {
+                if (allUsers[j].score > allUsers[i].score) {
+                    LeaderboardEntry memory temp = allUsers[i];
+                    allUsers[i] = allUsers[j];
+                    allUsers[j] = temp;
+                }
+            }
+        }
+
+        // Slice down to the requested limit
+        uint256 returnSize = index < limit ? index : limit;
+        LeaderboardEntry[] memory finalResult = new LeaderboardEntry[](returnSize);
+        for (uint256 i = 0; i < returnSize; i++) {
+            finalResult[i] = allUsers[i];
+        }
+
+        return finalResult;
+    }
 
     /// @notice Calculates the current reputation score for a user.
     /// @dev Score = amount held (wei) * days held. Returns 0 if no deposit or timestamp.
@@ -536,6 +539,13 @@ contract YieldRouter is Ownable, ReentrancyGuard {
     /// @param newDecayRate The new daily decay rate (scaled by 1e18).
     event DecayRateUpdated(uint256 newDecayRate);
 
+    /// @notice Emitted when reputation boost factors are updated.
+    event BoostFactorsUpdated(
+        uint256 newBronzeBoost,
+        uint256 newSilverBoost,
+        uint256 newGoldBoost
+    );
+
     /// @notice Emitted when a user achieves a new reputation tier.
     /// @param user The user who achieved the tier.
     /// @param tier The reputation tier achieved.
@@ -692,6 +702,9 @@ contract YieldRouter is Ownable, ReentrancyGuard {
 
         userDeposit.amount += amount;
 
+        // Add to active users set for leaderboard tracking
+        usersWithReputation.add(msg.sender);
+
         // Pull tokens from the user to the router.
         fxrp.transferFrom(msg.sender, address(this), amount);
         // Then supply to the chosen venue.
@@ -734,6 +747,7 @@ contract YieldRouter is Ownable, ReentrancyGuard {
         if (userDeposit.amount == 0) {
             userDeposit.timestamp = 0;
             userUsingMorpho[msg.sender] = false;
+            usersWithReputation.remove(msg.sender);
         }
 
         // Update reputation snapshot if changed

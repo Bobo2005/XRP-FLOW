@@ -20,6 +20,10 @@ contract MockMorpho is IMorpho {
     /// @notice Tracks the amount each `onBehalf` address has supplied.
     mapping(address => uint256) public supplied;
 
+    constructor(address _fxrpToken) {
+        fxrpToken = IERC20(_fxrpToken);
+    }
+
     /// @notice Records a supply call, minting 1:1 shares for simplicity.
     function supply(
         MarketParams memory /* marketParams */,
@@ -58,10 +62,5 @@ contract MockMorpho is IMorpho {
     ///         aggregate market state, only per-address supplied amounts.
     function market(bytes32 /* id */) external pure override returns (Market memory) {
         return Market(0, 0, 0, 0, 0, 0);
-    }
-
-    /// @dev Constructor takes the FXRP token contract address.
-    constructor(address _fxrpToken) {
-        fxrpToken = IERC20(_fxrpToken);
     }
 }

@@ -2,12 +2,12 @@
   "network": "coston2",
   "chainId": 114,
   "deployer": "0x3416DA5e1a125b23eAe34668F1bEDC04a14CE05E",
-  "deployedAt": "2026-08-07T11:58:56.597Z",
-  "deployBlock": 33739161,
+  "deployedAt": "2026-08-22T22:39:18.074Z",
+  "deployBlock": 34369927,
   "contracts": {
-    "MockFXRP": "0x20BA6148f5d3Fea80D69E1aD98585dFBe5CDc011",
-    "MockKinetic": "0x6E29B9cb1A6a81F6c5A74a46557AF3f079891d54",
-    "MockMorpho": "0x025E24A46f33c26D89503b74637F42f6338C6A94",
-    "YieldRouter": "0xBc70058044DA048a17436c03569d00111986f44e"
+    "MockFXRP": "0xd0b7DbC7C6E51746dd97AE108fDD839794C7Bfe1",
+    "MockKinetic": "0x4955F32db510EF03d23293E274e20c024B8Ed227",
+    "MockMorpho": "0x98b56aBD0aAB3131a4d245e161dCaF5e54d32b6e",
+    "YieldRouter": "0x72546D3157cd68CB808faBCd831713a1eeE79356"
   }
 }

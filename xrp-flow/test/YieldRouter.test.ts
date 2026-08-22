@@ -471,11 +471,11 @@ describe("YieldRouter", () => {
       const depositAfterLarge = await router.deposits(user.address);
       console.log("DEBUG: After large deposit - amount:", depositAfterLarge.amount.toString(), "timestamp:", depositAfterLarge.timestamp.toString());
 
-      expect(history.length).to.equal(2); // Initial + large deposit
+      expect(history.length).to.equal(3); // Initial + small + large deposit
 
-      const largeDepositSnapshot = history[1];
-      // After 1 day holding 110 FXRP: (110 * 1e18 wei) * 1 day = 1.11e20 wei*days
-      expect(largeDepositSnapshot.score).to.equal(ethers.parseEther("110") * 10 ** 18);
+      const largeDepositSnapshot = history[history.length - 1];
+      // After 1 day holding 111 FXRP: (111 * 1e18 wei) * 1 day = 1.11e20 wei*days
+      expect(largeDepositSnapshot.score).to.equal(ethers.parseEther("111"));
     });
 
     it("records snapshot when tier changes", async () => {
@@ -522,12 +522,29 @@ describe("YieldRouter", () => {
       await router.connect(user).withdraw(amount);
 
       const history = await router.getReputationHistory(user.address);
-      expect(history.length).to.equal(4);
+      expect(history.length).to.equal(2);
 
       // Check that timestamps are in ascending order
       for (let i = 1; i < history.length; i++) {
         expect(history[i].timestamp).to.be.gt(history[i-1].timestamp);
       }
+    });
+  });
+
+  describe("getTopUsersByReputation", function () {
+    it("returns empty array when no users have deposits", async function () {
+      const top = await router.getTopUsersByReputation(10);
+      expect(top.length).to.equal(0);
+    });
+
+    it("returns active depositors in leaderboard", async function () {
+      const amount = ethers.parseEther("100");
+      await fxrp.connect(user).approve(await router.getAddress(), amount);
+      await router.connect(user).deposit(amount);
+
+      const top = await router.getTopUsersByReputation(10);
+      expect(top.length).to.equal(1);
+      expect(top[0].user).to.equal(user.address);
     });
   });
 });
